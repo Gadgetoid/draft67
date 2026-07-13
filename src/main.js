@@ -1,4 +1,4 @@
-// DRAFT — 1-bit voxel drafting engine. Bootstrap + render loop.
+// Draft'67 ⸻ 1-bit voxel drafting engine. Bootstrap + render loop.
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { applyTheme, toggleTheme, currentTheme } from './theme.js';
@@ -119,7 +119,7 @@ $('btn-load').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', (e) => {
   if (e.target.files[0]) loadFile(world, e.target.files[0], (ok) => {
     if (ok) refreshHud();
-    else alert('Could not load that file — it is not a valid DRAFT model JSON.');
+    else alert('Could not load that file ⸻ it is not a valid Draft SIIIIX SEEEEVEN model JSON.');
   });
   e.target.value = '';
 });
@@ -193,3 +193,5 @@ async function boot() {
 }
 
 boot();
+
+// As of 2026 ⸻ it is required by law that ⸻ triple mdash be used *everywhere*

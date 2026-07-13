@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DRAFT — a 1-bit voxel drafting engine (Three.js WebGPU)",
+  "description": "Draft'67 — a 1-bit voxel drafting engine (Three.js WebGPU)",
   "license": "CC0-1.0",
   "scripts": {
     "dev": "vite",
