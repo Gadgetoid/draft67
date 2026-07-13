@@ -1,17 +1,21 @@
-# DRAFT - a 1-bit voxel drafting engine
+# Draft'67 - a 1-bit voxel drafting engine
+
+(Draft siiixxx seeeven†. [Try it out for yourself!](https://gadgetoid.github.io/draft67/))
 
 Build in 3D with the visual language of an old engineering drawing. Every block is skinned in a
 conventional draughting **cross-hatch** (cast iron, steel, brass, copper, wood, brick, stone,
 glass, and more) rendered strictly in two tones: ink on paper, or white on blueprint blue.
 Place and remove blocks, fly around, and export a clean orthographic **blueprint** of your model.
 
-![DRAFT in both themes, paper and blueprint, split down the middle](screenshot.png)
+![Draft'67 in both themes, paper and blueprint, split down the middle](screenshot.png)
+
+† - blame my kids
 
 ## Inspiration
 
 The look is heavily inspired by a **Bluesky post** that shared a plate of *"Conventional Standard
 Cross-Hatchings"* from an old drafting / mechanical-drawing textbook: the standardised line-fill
-patterns draughtsmen used to indicate materials in section. DRAFT takes those 2D material
+patterns draughtsmen used to indicate materials in section. Draft'67 takes those 2D material
 conventions and wraps them around 3D voxels.
 
 ![The full material palette, one block per type, rendered by the engine's blueprint export](preview.png)
