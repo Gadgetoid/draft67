@@ -42,22 +42,6 @@ function hatch(ctx, kind, period, weight, dash) {
   ctx.restore();
 }
 
-function fillDots(ctx, count, r, seed) {
-  ctx.fillStyle = INK;
-  let s = seed;
-  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-  for (let i = 0; i < count; i++) {
-    const x = rnd() * TILE, y = rnd() * TILE;
-    const rr = r * (0.4 + rnd());
-    // draw with wrap so dots crossing the edge appear on both sides
-    for (const dx of [-TILE, 0, TILE]) for (const dy of [-TILE, 0, TILE]) {
-      ctx.beginPath();
-      ctx.arc(x + dx, y + dy, rr, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-}
-
 // horizontal courses (brick / stone / liquid); rows evenly divide TILE
 function courses(ctx, rows, weight) {
   const h = TILE / rows;
@@ -87,7 +71,7 @@ export const MATERIALS = [
     draw: (c) => hatch(c, '/', 16, 2.0, [10, 6]),
   },
   {
-    id: 'aluminum', name: 'ALUMINUM', key: '',
+    id: 'aluminum', name: 'ALUMINUM', key: 'y',
     draw: (c) => hatch(c, '/', 16, 1.6, [5, 6]),
   },
   {
@@ -99,12 +83,23 @@ export const MATERIALS = [
     draw: (c) => { hatch(c, '/', 8, 1.6); hatch(c, '\\', 8, 1.6); },
   },
   {
-    id: 'wires', name: 'WIRES', key: '',
+    id: 'wires', name: 'WIRES', key: 'u',
     draw: (c) => { hatch(c, '/', 8, 0.8); hatch(c, '\\', 8, 0.8); },
   },
   {
-    id: 'vulcanite', name: 'VULCANITE', key: '',
-    draw: (c) => hatch(c, '/', 8, 5.5), // heavy, nearly-solid diagonal
+    id: 'vulcanite', name: 'VULCANITE', key: 'i',
+    // heavy, nearly-solid diagonal: solid ink with thin paper gaps (stays dark under minification)
+    draw: (c) => {
+      c.fillStyle = INK; c.fillRect(0, 0, TILE, TILE);
+      c.save();
+      c.globalCompositeOperation = 'destination-out';
+      c.lineWidth = 2.5; c.lineCap = 'butt'; c.strokeStyle = '#000';
+      const T = TILE;
+      for (let cc = -T; cc <= 2 * T; cc += 16) { // erase '/' diagonals -> thin paper stripes
+        c.beginPath(); c.moveTo(-T, -T - cc); c.lineTo(2 * T, 2 * T - cc); c.stroke();
+      }
+      c.restore();
+    },
   },
   {
     id: 'wood', name: 'WOOD', key: '7', align: true,
@@ -188,11 +183,11 @@ export const MATERIALS = [
     },
   },
   {
-    id: 'liquid', name: 'LIQUID', key: '', align: true, // clickable only
+    id: 'liquid', name: 'LIQUID', key: 'o', align: true,
     draw: (c) => courses(c, 8, 1.3),
   },
   {
-    id: 'leather', name: 'LEATHER', key: '',
+    id: 'leather', name: 'LEATHER', key: 'p',
     draw: (c) => {
       // fine random short strokes (the "grain") + a few larger filled specks
       c.strokeStyle = INK; c.lineWidth = 1.0; c.lineCap = 'round';
@@ -215,6 +210,10 @@ export const MATERIALS = [
   },
 ];
 
+// Hotbar keys are assigned strictly left-to-right by palette order: 1234567890 then y u i o p.
+// (This is the single source of truth for keys; the inline `key` values above are for reference.)
+'1234567890yuiop'.split('').forEach((k, i) => { if (MATERIALS[i]) MATERIALS[i].key = k; });
+
 // Draw one material into a fresh transparent canvas.
 export function makeHatchCanvas(material, size = TILE) {
   const cv = document.createElement('canvas');
@@ -224,22 +223,6 @@ export function makeHatchCanvas(material, size = TILE) {
   ctx.scale(size / TILE, size / TILE);
   material.draw(ctx);
   return cv;
-}
-
-// Faint drafting graph-paper grid for the build plane (also the pick surface when empty).
-export function makeGridTexture(cells = 1) {
-  const px = 128;
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = px;
-  const ctx = cv.getContext('2d');
-  ctx.clearRect(0, 0, px, px);
-  ctx.strokeStyle = 'rgba(20,17,11,0.5)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(0, 0, px, px); // one cell border -> continuous grid when tiled
-  const tex = new THREE.CanvasTexture(cv);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.NoColorSpace;
-  return tex;
 }
 
 // A CanvasTexture (repeat-wrapped) for use as the shader hatch source.
@@ -274,6 +257,3 @@ export function makeBayerTexture() {
   tex.needsUpdate = true;
   return tex;
 }
-
-export const PAPER = new THREE.Color('#f2e9d0');
-export const INK_COLOR = new THREE.Color('#14110b');

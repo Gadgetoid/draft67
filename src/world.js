@@ -3,14 +3,19 @@
 // so neighbouring blocks of the same material merge into one continuous drawn surface.
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { Fn, uniform, vec2, vec3, positionWorld, fract, min, max, abs, dFdx, dFdy, length, smoothstep, float } from 'three/tsl';
+import { Fn, uniform, vec2, positionWorld, fract, min, max, abs, dFdx, dFdy, length, smoothstep, float } from 'three/tsl';
 import { MATERIALS, makeHatchTexture, makeBayerTexture } from './materials.js';
 import { makeHatchMaterial } from './hatchMaterial.js';
+import { inkColor } from './theme.js';
 
 const GROUND_SIZE = 400;
 
 const CUBE = new THREE.BoxGeometry(1, 1, 1);
 const key = (x, y, z) => `${x},${y},${z}`;
+const CUBE_R = Math.sqrt(3) / 2; // half-diagonal of a unit cube (for broad-phase bounds)
+const _m4 = new THREE.Matrix4();
+const _v = new THREE.Vector3();
+const _sphere = new THREE.Sphere();
 
 export class VoxelWorld {
   constructor(scene) {
@@ -24,7 +29,7 @@ export class VoxelWorld {
     this.gridCenter = uniform(vec2(0, 0)); // follows the camera focus so the grid stays under the work
     const gridCenter = this.gridCenter;
     const groundMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
-    groundMat.colorNode = vec3(0.078, 0.067, 0.043);
+    groundMat.colorNode = inkColor;
     groundMat.opacityNode = Fn(() => {
       const pw = positionWorld.xz.add(0.5);             // block edges land on integer cells
       const g = fract(pw);
@@ -56,7 +61,11 @@ export class VoxelWorld {
       const mat = makeHatchMaterial(tex, bayer, { scale: 0.5, rot: m.align ? [0, 0, 0] : undefined });
       const idVal = (idx + 1) / (MATERIALS.length + 1);
       const idMaterial = new MeshBasicNodeMaterial({ color: new THREE.Color(idVal, idVal, idVal) });
-      const entry = { mesh: null, coords: [], mat, idMaterial, materialId: m.id };
+      const entry = {
+        mesh: null, mat, idMaterial, materialId: m.id,
+        keyToIndex: new Map(), // voxel key -> instance index
+        indexToKey: [],        // instance index -> voxel key
+      };
       entry.mesh = this._makeMesh(entry, 16);
       this.meshes.set(m.id, entry);
     });
@@ -78,47 +87,86 @@ export class VoxelWorld {
   has(x, y, z) { return this.voxels.has(key(x, y, z)); }
   get size() { return this.voxels.size; }
 
+  // Incremental edits: O(1) per block (append / swap-remove), not a full per-material rebuild.
   set(x, y, z, materialId) {
-    this.voxels.set(key(x, y, z), materialId);
-    this._rebuild();
+    const k = key(x, y, z);
+    const existing = this.voxels.get(k);
+    if (existing === materialId) return;
+    if (existing !== undefined) this._removeInstance(existing, k);
+    this.voxels.set(k, materialId);
+    this._addInstance(materialId, k, x, y, z);
   }
-  remove(x, y, z) {
-    if (this.voxels.delete(key(x, y, z))) this._rebuild();
-  }
-  clear() { this.voxels.clear(); this._rebuild(); }
 
-  // rebuild every per-material instanced mesh from the voxel map
-  _rebuild() {
-    for (const entry of this.meshes.values()) entry.coords.length = 0;
-    for (const [k, mid] of this.voxels) {
-      const entry = this.meshes.get(mid) || this.meshes.get(MATERIALS[0].id);
-      const [x, y, z] = k.split(',').map(Number);
-      entry.coords.push(x, y, z);
+  remove(x, y, z) {
+    const k = key(x, y, z);
+    const mid = this.voxels.get(k);
+    if (mid === undefined) return;
+    this.voxels.delete(k);
+    this._removeInstance(mid, k);
+  }
+
+  clear() {
+    this.voxels.clear();
+    for (const e of this.meshes.values()) {
+      e.mesh.count = 0;
+      e.mesh.instanceMatrix.needsUpdate = true;
+      e.mesh.boundingSphere = null;
+      e.keyToIndex.clear();
+      e.indexToKey.length = 0;
     }
-    const mat4 = new THREE.Matrix4();
-    for (const entry of this.meshes.values()) {
-      const coords = entry.coords;
-      const need = coords.length / 3;
-      let mesh = entry.mesh;
-      // Grow by RECREATING the InstancedMesh (fresh GPU buffers). Swapping the instanceMatrix
-      // attribute in place leaves WebGPU bound to the stale buffer, so live edits stop showing.
-      if (need > mesh.instanceMatrix.count) {
-        this.group.remove(mesh);
-        mesh.dispose();
-        let cap = 16; while (cap < need) cap *= 2;
-        mesh = entry.mesh = this._makeMesh(entry, cap);
-      }
-      for (let i = 0; i < need; i++) {
-        mat4.makeTranslation(coords[i * 3], coords[i * 3 + 1], coords[i * 3 + 2]);
-        mesh.setMatrixAt(i, mat4);
-      }
-      mesh.count = need;
-      mesh.instanceMatrix.needsUpdate = true;
-      // Invalidate the instanced broad-phase bounds so raycasting sees the new instances.
-      mesh.boundingSphere = null;
-      mesh.boundingBox = null;
-      mesh.computeBoundingSphere();
+  }
+
+  _addInstance(materialId, k, x, y, z) {
+    const e = this.meshes.get(materialId) || this.meshes.get(MATERIALS[0].id);
+    let mesh = e.mesh;
+    const i = mesh.count;
+    if (i >= mesh.instanceMatrix.count) mesh = this._growEntry(e);
+    mesh.setMatrixAt(i, _m4.makeTranslation(x, y, z));
+    mesh.count = i + 1;
+    mesh.instanceMatrix.needsUpdate = true;
+    e.keyToIndex.set(k, i);
+    e.indexToKey[i] = k;
+    // grow the broad-phase bounds to include the new block (never shrink -> stays valid for picks)
+    _sphere.set(_v.set(x, y, z), CUBE_R);
+    if (mesh.boundingSphere) mesh.boundingSphere.union(_sphere);
+    else mesh.boundingSphere = _sphere.clone();
+  }
+
+  _removeInstance(materialId, k) {
+    const e = this.meshes.get(materialId);
+    if (!e) return;
+    const mesh = e.mesh;
+    const i = e.keyToIndex.get(k);
+    if (i === undefined) return;
+    const last = mesh.count - 1;
+    if (i !== last) { // swap the last instance into the freed slot
+      mesh.getMatrixAt(last, _m4);
+      mesh.setMatrixAt(i, _m4);
+      const movedKey = e.indexToKey[last];
+      e.keyToIndex.set(movedKey, i);
+      e.indexToKey[i] = movedKey;
     }
+    mesh.count = last;
+    mesh.instanceMatrix.needsUpdate = true;
+    e.keyToIndex.delete(k);
+    e.indexToKey.length = last;
+    // bounding sphere intentionally left as-is: still encloses all remaining instances
+  }
+
+  // Grow by RECREATING the InstancedMesh (fresh GPU buffers) and copying existing instances.
+  // Swapping the instanceMatrix attribute in place leaves WebGPU bound to a stale buffer.
+  _growEntry(e) {
+    const old = e.mesh;
+    const cap = Math.max(16, old.instanceMatrix.count * 2);
+    const mesh = this._makeMesh(e, cap);
+    for (let i = 0; i < old.count; i++) { old.getMatrixAt(i, _m4); mesh.setMatrixAt(i, _m4); }
+    mesh.count = old.count;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.boundingSphere = old.boundingSphere ? old.boundingSphere.clone() : null;
+    this.group.remove(old);
+    old.dispose();
+    e.mesh = mesh;
+    return mesh;
   }
 
   // Ray pick -> { place:[x,y,z], remove:[x,y,z]|null } or null.
@@ -134,8 +182,9 @@ export class VoxelWorld {
       }
       if (h.instanceId == null) continue;
       const entry = this.meshes.get(h.object.userData.materialId);
-      const i = h.instanceId * 3;
-      const c = [entry.coords[i], entry.coords[i + 1], entry.coords[i + 2]];
+      const k = entry.indexToKey[h.instanceId];
+      if (k === undefined) continue;
+      const c = k.split(',').map(Number);
       const n = h.face.normal; // local == world (axis-aligned, translation-only)
       const normal = [Math.round(n.x), Math.round(n.y), Math.round(n.z)];
       return { place: [c[0] + normal[0], c[1] + normal[1], c[2] + normal[2]], remove: c };
@@ -150,8 +199,13 @@ export class VoxelWorld {
     });
   }
   fromJSON(arr) {
-    this.voxels.clear();
-    for (const b of arr) this.voxels.set(key(b.x, b.y, b.z), b.m);
-    this._rebuild();
+    if (!Array.isArray(arr)) throw new Error('invalid model: expected an array');
+    this.clear();
+    for (const b of arr) {
+      if (typeof b?.x !== 'number' || typeof b?.y !== 'number' || typeof b?.z !== 'number') {
+        throw new Error('invalid model: bad block entry');
+      }
+      this.set(b.x, b.y, b.z, b.m);
+    }
   }
 }

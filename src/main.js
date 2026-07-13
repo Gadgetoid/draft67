@@ -1,7 +1,7 @@
 // DRAFT — 1-bit voxel drafting engine. Bootstrap + render loop.
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
-import { PAPER } from './materials.js';
+import { applyTheme, toggleTheme, currentTheme } from './theme.js';
 import { VoxelWorld } from './world.js';
 import { CameraRig } from './controls.js';
 import { UI } from './ui.js';
@@ -16,7 +16,7 @@ const renderer = new WebGPURenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
 const scene = new THREE.Scene();
-scene.background = PAPER.clone();
+applyTheme(localStorage.getItem('draft-theme') || 'paper', scene);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
 camera.position.set(7, 6, 9);
@@ -30,7 +30,7 @@ window.__THREE = THREE;
 window.__draft = { world, camera, scene, rig };
 
 let outline = null;
-const state = { useOutline: true, paused: false };
+const state = { useOutline: true, paused: false, busy: false };
 window.__draft = Object.assign(window.__draft || {}, { state });
 
 function resize() {
@@ -70,6 +70,7 @@ function enterBlueprint() {
   const { center, radius } = modelBounds();
   world.ground.visible = false;          // grid off in blueprint
   rig.enterBlueprint(center, radius);
+  syncModeUi();                          // entering may normalize FP -> orbit
   resize();                              // set ortho aspect
   $('blueprint-bar').classList.remove('hidden');
   $('viewcube').classList.remove('hidden');
@@ -79,6 +80,7 @@ function exitBlueprint() {
   world.ground.visible = true;
   $('blueprint-bar').classList.add('hidden');
   $('viewcube').classList.add('hidden');
+  syncModeUi();
   resize();
 }
 
@@ -95,17 +97,30 @@ function syncViewcube() {
 }
 $('btn-export').addEventListener('click', enterBlueprint);
 $('btn-bp-exit').addEventListener('click', exitBlueprint);
+// Pause the render loop AND wait for any in-flight frame to finish, so the export's renderAsync
+// never runs concurrently with the loop's on the same renderer.
+async function pauseRendering() {
+  state.paused = true;
+  while (state.busy) await new Promise((r) => requestAnimationFrame(r));
+}
 $('btn-bp-export').addEventListener('click', async () => {
-  state.paused = true;                   // avoid two renderAsync calls racing on one renderer
-  await new Promise((r) => requestAnimationFrame(r));
+  await pauseRendering();
   try { await exportBlueprint(renderer, scene, state.useOutline ? outline : null, rig.activeCamera); }
   catch (err) { console.error('Blueprint export failed:', err); }
   finally { resize(); state.paused = false; }
 });
+$('btn-theme').addEventListener('click', () => {
+  const name = toggleTheme(scene);
+  localStorage.setItem('draft-theme', name);
+  $('btn-theme').textContent = name === 'paper' ? 'Blueprint' : 'Paper';
+});
 $('btn-save').addEventListener('click', () => downloadJSON(world));
 $('btn-load').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', (e) => {
-  if (e.target.files[0]) loadFile(world, e.target.files[0], () => refreshHud());
+  if (e.target.files[0]) loadFile(world, e.target.files[0], (ok) => {
+    if (ok) refreshHud();
+    else alert('Could not load that file — it is not a valid DRAFT model JSON.');
+  });
   e.target.value = '';
 });
 $('btn-clear').addEventListener('click', () => {
@@ -117,6 +132,7 @@ addEventListener('keydown', (e) => {
   if (rig.blueprint) { if (e.code === 'Escape') exitBlueprint(); return; }
   if (e.code === 'Tab') { e.preventDefault(); rig.toggle(); syncModeUi(); }
   else if (/^(Digit|Numpad)\d$/.test(e.code)) ui.selectByKey(e.code.slice(-1));
+  else if (e.code.startsWith('Key')) ui.selectByKey(e.code.slice(3).toLowerCase()); // y/u/i/o/p etc.
 });
 function syncModeUi() {
   ui.setMode(rig.mode);
@@ -150,13 +166,13 @@ async function boot() {
   seed();
   refreshHud();
   syncModeUi();
+  $('btn-theme').textContent = currentTheme() === 'paper' ? 'Blueprint' : 'Paper';
 
   const clock = new THREE.Clock();
-  let busy = false;
   async function frame() {
     requestAnimationFrame(frame);
-    if (busy || state.paused) return;
-    busy = true;
+    if (state.busy || state.paused) return;
+    state.busy = true;
     rig.update(clock.getDelta());
     if (rig.blueprint) syncViewcube();
     else {
@@ -171,7 +187,7 @@ async function boot() {
       console.error('Render error, dropping outline:', err);
       state.useOutline = false;
     }
-    busy = false;
+    state.busy = false;
   }
   frame();
 }

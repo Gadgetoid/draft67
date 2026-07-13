@@ -7,9 +7,10 @@
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  Fn, vec2, vec3, vec4, uniform, texture, uv, normalView, positionView,
+  Fn, vec2, vec4, uniform, texture, uv, normalView, positionView,
   abs, max, clamp, mix, step, length,
 } from 'three/tsl';
+import { inkColor } from './theme.js';
 
 export class OutlinePipeline {
   constructor(renderer) {
@@ -29,7 +30,6 @@ export class OutlinePipeline {
 
     const texel = uniform(vec2(1, 1));
     this.texel = texel;
-    const INK = vec3(0.078, 0.067, 0.043);
 
     const comp = new MeshBasicNodeMaterial();
     comp.colorNode = Fn(() => {
@@ -57,7 +57,7 @@ export class OutlinePipeline {
       const idEdge = max(abs(il.sub(ir)), abs(iu.sub(idd))).mul(40.0);
 
       const edge = step(0.4, max(max(nEdge, dEdge), idEdge));
-      return vec4(mix(co.xyz, INK, edge), 1.0);
+      return vec4(mix(co.xyz, inkColor, edge), 1.0);
     })();
 
     this.quadScene = new THREE.Scene();

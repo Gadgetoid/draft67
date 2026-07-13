@@ -31,25 +31,52 @@ export class CameraRig {
 
     this.keys = new Set();
     this.speed = 6; // world units / sec
+    this.lookSpeed = 1.7; // rad / sec for arrow-key look
     addEventListener('keydown', (e) => this.keys.add(e.code));
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    this._savedOrbit = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+    this._tmp = new THREE.Vector3();
+    this._fwd = new THREE.Vector3();
+    this._right = new THREE.Vector3();
+    this._move = new THREE.Vector3();
+    this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  }
+
+  // WASD flies the pivot through the scene along the CAMERA's view axes (move camera and orbit
+  // target together so the view angle is preserved). Used in orbit mode.
+  _flyOrbit(dt) {
+    const k = this.keys;
+    let f = 0, s = 0;
+    if (k.has('KeyW')) f += 1;
+    if (k.has('KeyS')) f -= 1;
+    if (k.has('KeyD')) s += 1;
+    if (k.has('KeyA')) s -= 1;
+    if (!f && !s) return;
+    const d = this.speed * dt;
+    this.camera.updateMatrixWorld();
+    this.camera.getWorldDirection(this._fwd).normalize();               // full view direction
+    this._right.setFromMatrixColumn(this.camera.matrixWorld, 0).normalize(); // camera right
+    this._move.set(0, 0, 0)
+      .addScaledVector(this._fwd, f * d)
+      .addScaledVector(this._right, s * d);
+    this.camera.position.add(this._move);
+    this.orbit.target.add(this._move);
   }
 
   setMode(mode) {
     if (mode === this.mode) return;
     this.mode = mode;
     if (mode === 'fp') {
-      this._savedOrbit.pos.copy(this.camera.position);
-      this._savedOrbit.target.copy(this.orbit.target);
       this.orbit.enabled = false;
       this.fp.enabled = true;
       document.body.classList.add('fp');
     } else {
       this.fp.enabled = false;
       if (this.fp.isLocked) this.fp.unlock();
+      // Keep the current view: orbit around a point in front of where the camera looks, so
+      // returning from first-person doesn't snap/flip to a stale target.
+      this.camera.getWorldDirection(this._tmp);
+      this.orbit.target.copy(this.camera.position).addScaledVector(this._tmp, 8);
       this.orbit.enabled = true;
-      this.orbit.target.copy(this._savedOrbit.target);
       document.body.classList.remove('fp');
     }
   }
@@ -59,6 +86,7 @@ export class CameraRig {
 
   // Enter orthographic blueprint preview, framed on the model, matching the current view angle.
   enterBlueprint(center, radius) {
+    if (this.mode === 'fp') this.setMode('orbit'); // normalize so exiting blueprint restores cleanly
     this.blueprint = true;
     this.orbit.enabled = false;
     this.fp.enabled = false;
@@ -112,7 +140,7 @@ export class CameraRig {
 
   update(dt) {
     if (this.blueprint) { this.orthoOrbit.update(); return; }
-    if (this.mode === 'orbit') { this.orbit.update(); return; }
+    if (this.mode === 'orbit') { this._flyOrbit(dt); this.orbit.update(); return; }
     if (!this.fp.isLocked) return;
     const d = this.speed * dt;
     const k = this.keys;
@@ -122,5 +150,20 @@ export class CameraRig {
     if (k.has('KeyA')) this.fp.moveRight(-d);
     if (k.has('Space')) this.camera.position.y += d;
     if (k.has('ControlLeft') || k.has('ShiftLeft')) this.camera.position.y -= d;
+
+    // Arrow keys look around too, so you can hold-paint and sweep the crosshair over cells.
+    let ry = 0, rx = 0;
+    if (k.has('ArrowLeft')) ry += 1;
+    if (k.has('ArrowRight')) ry -= 1;
+    if (k.has('ArrowUp')) rx += 1;
+    if (k.has('ArrowDown')) rx -= 1;
+    if (ry || rx) {
+      const look = this.lookSpeed * dt;
+      const maxX = Math.PI / 2 - 0.02;
+      this._euler.setFromQuaternion(this.camera.quaternion);
+      this._euler.y += ry * look;
+      this._euler.x = Math.max(-maxX, Math.min(maxX, this._euler.x + rx * look));
+      this.camera.quaternion.setFromEuler(this._euler);
+    }
   }
 }

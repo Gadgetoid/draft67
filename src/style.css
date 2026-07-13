@@ -2,7 +2,19 @@
   --paper: #f2e9d0;
   --ink: #14110b;
   --ink-soft: #14110b99;
+  --outer: #d9cfb4;
 }
+
+/* Blueprint theme: white/cream ink on classic blueprint blue. */
+:root[data-theme="blueprint"] {
+  --paper: #0f3b74;
+  --ink: #a6c1ef;
+  --ink-soft: #a6c1ef66;
+  --outer: #082247;
+}
+/* palette swatches: drop the grayscale (it kills the blue) and invert the line art white-on-blue */
+:root[data-theme="blueprint"] .swatch { filter: none; }
+:root[data-theme="blueprint"] .swatch canvas { filter: invert(1); }
 
 * { box-sizing: border-box; }
 
@@ -10,7 +22,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #d9cfb4;
+  background: var(--outer);
   font-family: "Courier New", ui-monospace, monospace;
   color: var(--ink);
   -webkit-font-smoothing: none;

@@ -7,6 +7,7 @@ import {
   screenCoordinate, abs, dot, max, fract, mix, step, sin, cos, clamp,
   normalize, pow,
 } from 'three/tsl';
+import { inkColor, paperColor } from './theme.js';
 
 // rotate a 2D coord by a constant angle (constant -> seamless tiling preserved)
 const rot = Fn(([p, a]) => {
@@ -22,8 +23,6 @@ const sampleHatch = Fn(([tex, p, ang, scale]) => {
 });
 
 export function makeHatchMaterial(hatchTex, bayerTex, opts = {}) {
-  const paper = uniform(vec3(0.949, 0.914, 0.816)); // #f2e9d0
-  const ink = uniform(vec3(0.078, 0.067, 0.043));   // #14110b
   const scale = uniform(float(opts.scale ?? 1.0));
   const light = uniform(normalize(vec3(0.55, 0.9, 0.35)));
 
@@ -54,9 +53,9 @@ export function makeHatchMaterial(hatchTex, bayerTex, opts = {}) {
     const ditherInk = step(bayer, shadow);
 
     const inkAmt = max(hatchInk, ditherInk);
-    return mix(paper, ink, inkAmt);
+    return mix(paperColor, inkColor, inkAmt);
   })();
 
-  mat.userData.uniforms = { paper, ink, scale, light };
+  mat.userData.uniforms = { scale, light };
   return mat;
 }
