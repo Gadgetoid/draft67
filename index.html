@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DRAFT — 1-bit voxel drafting engine</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- Drafting sheet frame -->
+    <div id="sheet">
+      <canvas id="viewport"></canvas>
+      <div id="crosshair" class="hidden">+</div>
+
+      <!-- Title block, lower-right, like a real drafting sheet -->
+      <div id="titleblock">
+        <div class="tb-row tb-title">DRAFT</div>
+        <div class="tb-row">1-BIT VOXEL DRAFTING ENGINE</div>
+        <div class="tb-grid">
+          <span class="k">MODE</span><span id="tb-mode" class="v">ORBIT</span>
+          <span class="k">MAT'L</span><span id="tb-material" class="v">CAST IRON</span>
+          <span class="k">BLOCKS</span><span id="tb-count" class="v">0</span>
+          <span class="k">RENDER</span><span id="tb-backend" class="v">…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Material palette / hotbar -->
+    <div id="palette"></div>
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <button id="btn-mode" title="Toggle camera (Tab)">Orbit</button>
+      <button id="btn-export" title="Export blueprint PNG">Blueprint</button>
+      <button id="btn-save" title="Save model (JSON)">Save</button>
+      <button id="btn-load" title="Load model (JSON)">Load</button>
+      <button id="btn-clear" title="Clear all blocks">Clear</button>
+      <input id="file-input" type="file" accept="application/json" hidden />
+    </div>
+
+    <!-- Blueprint preview bar (shown only in blueprint mode) -->
+    <div id="blueprint-bar" class="hidden">
+      <span class="bp-label">BLUEPRINT PREVIEW — orbit or use the cube to choose angle</span>
+      <button id="btn-bp-export">Export PNG</button>
+      <button id="btn-bp-exit">Exit</button>
+    </div>
+
+    <!-- Orientation cube: click a face to snap to a cardinal view (blueprint mode only) -->
+    <div id="viewcube" class="hidden">
+      <div class="vc-scene">
+        <div class="vc-cube">
+          <div class="vc-face vc-front"  data-dir="0,0,1">FRT</div>
+          <div class="vc-face vc-back"   data-dir="0,0,-1">BCK</div>
+          <div class="vc-face vc-right"  data-dir="1,0,0">RGT</div>
+          <div class="vc-face vc-left"   data-dir="-1,0,0">LFT</div>
+          <div class="vc-face vc-top"    data-dir="0,1,0">TOP</div>
+          <div class="vc-face vc-bottom" data-dir="0,-1,0">BOT</div>
+        </div>
+      </div>
+      <button class="vc-iso" data-dir="1,0.8,1">ISO</button>
+    </div>
+
+    <!-- Help / hints -->
+    <div id="hints">
+      <b>LMB</b> place · <b>RMB / Shift+LMB</b> remove · <b>1–9,0</b> material · <b>Tab</b> camera ·
+      <span class="fp-only">WASD move · Space/Ctrl up-down · Esc release mouse</span>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

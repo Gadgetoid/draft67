@@ -1,0 +1,18 @@
+{
+  "name": "draft-voxel-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DRAFT — a 1-bit voxel drafting engine (Three.js WebGPU)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
