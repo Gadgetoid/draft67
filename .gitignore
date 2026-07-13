@@ -2,3 +2,6 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# original inspiration reference (not distributed); the engine-rendered preview.png is used instead
+textures.webp

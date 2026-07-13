@@ -4,15 +4,18 @@
   "private": true,
   "type": "module",
   "description": "DRAFT — a 1-bit voxel drafting engine (Three.js WebGPU)",
+  "license": "CC0-1.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "hero": "node tools/generate-hero.mjs"
   },
   "dependencies": {
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "playwright": "^1.48.0",
     "vite": "^6.0.0"
   }
 }
