@@ -1,10 +1,10 @@
 // Raycast add/remove of blocks, in both orbit (mouse) and first-person (crosshair) modes.
 import * as THREE from 'three';
 
-export function attachInteraction({ dom, world, rig, ui, onChange }) {
+export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add' }) {
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  let downX = 0, downY = 0;
+  let downX = 0, downY = 0, downId = null, active = 0, maxActive = 0;
 
   function castFromMouse(e) {
     const r = dom.getBoundingClientRect();
@@ -30,14 +30,36 @@ export function attachInteraction({ dom, world, rig, ui, onChange }) {
     return false;
   }
 
-  // Orbit mode: click without drag = edit. Distinguish click from orbit-drag by movement.
-  dom.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+  // Orbit mode: a clean single-pointer tap (no drag) edits. Track pointer count so multi-touch
+  // gestures (pinch-zoom, two-finger pan) never place/remove a block.
+  dom.addEventListener('pointerdown', (e) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    if (active === 1) { downX = e.clientX; downY = e.clientY; downId = e.pointerId; }
+  });
+  function endPointer(e) {
+    const info = {
+      primary: e.pointerId === downId,
+      multi: maxActive > 1,
+      dist: Math.hypot(e.clientX - downX, e.clientY - downY),
+    };
+    active = Math.max(0, active - 1);
+    if (active === 0) maxActive = 0;
+    return info;
+  }
+  dom.addEventListener('pointercancel', endPointer);
   dom.addEventListener('pointerup', (e) => {
+    const { primary, multi, dist } = endPointer(e);
     if (rig.mode !== 'orbit') return;
-    if (e.button !== 0 && e.button !== 2) return; // ignore middle (pan) and others
-    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 7) return; // was a drag, not a click
-    castFromMouse(e);
-    edit(e.button === 2 || e.shiftKey);
+    if (!primary || multi || dist > 7) return;       // multi-touch gesture or a drag, not a tap
+    if (e.pointerType === 'touch') {                  // mobile: tap uses the Add/Del brush
+      castFromMouse(e);
+      edit(getBrush() === 'del');
+    } else {                                          // desktop: LMB place, RMB / Shift+LMB remove
+      if (e.button !== 0 && e.button !== 2) return;
+      castFromMouse(e);
+      edit(e.button === 2 || e.shiftKey);
+    }
   });
   dom.addEventListener('contextmenu', (e) => e.preventDefault());
 

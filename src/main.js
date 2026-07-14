@@ -25,6 +25,11 @@ const world = new VoxelWorld(scene);
 const rig = new CameraRig(camera, canvas);
 const ui = new UI(() => {});
 
+// Mobile (touch) layout + a tap edits using the Add/Del brush instead of mouse buttons.
+const isMobile = matchMedia('(pointer: coarse)').matches;
+document.body.classList.toggle('mobile', isMobile);
+let brush = 'add';
+
 // debug handles (used by the headless verifier)
 window.__THREE = THREE;
 window.__draft = { world, camera, scene, rig };
@@ -46,11 +51,20 @@ addEventListener('resize', resize);
 
 function refreshHud() { ui.setCount(world.size); autosave(world); }
 
-attachInteraction({ dom: canvas, world, rig, ui, onChange: refreshHud });
+attachInteraction({ dom: canvas, world, rig, ui, onChange: refreshHud, getBrush: () => brush });
 
 // --- toolbar wiring ---
 const $ = (id) => document.getElementById(id);
 $('btn-mode').addEventListener('click', () => { rig.toggle(); syncModeUi(); });
+
+// Add / Del brush (mobile): mutually-exclusive tap tool
+function setBrush(m) {
+  brush = m;
+  $('brush-add').classList.toggle('active', m === 'add');
+  $('brush-del').classList.toggle('active', m === 'del');
+}
+$('brush-add').addEventListener('click', () => setBrush('add'));
+$('brush-del').addEventListener('click', () => setBrush('del'));
 
 // model bounds for framing the blueprint camera
 function modelBounds() {

@@ -2,11 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Draft'67 ⸻ 1-bit voxel drafting engine</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- Mobile brand bar (top) -->
+    <div id="brand" class="mobile-only">DRAFT'67</div>
+
     <!-- Drafting sheet frame -->
     <div id="sheet">
       <canvas id="viewport"></canvas>
@@ -23,6 +26,12 @@
           <span class="k">RENDER</span><span id="tb-backend" class="v">…</span>
         </div>
       </div>
+    </div>
+
+    <!-- Mobile brush: mutually-exclusive Add / Delete tap tool -->
+    <div id="brush" class="mobile-only">
+      <button id="brush-add" class="active">Add</button>
+      <button id="brush-del">Del</button>
     </div>
 
     <!-- Material palette / hotbar -->
