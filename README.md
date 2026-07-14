@@ -48,7 +48,7 @@ the dev server running and a one-time `npx playwright install chromium`).
 | | Orbit | First-person |
 |---|---|---|
 | Look | LMB drag | move mouse (click to capture) / `Arrow` keys |
-| Move | `WASD` fly (view-aligned) | `WASD` move, `Space`/`Ctrl` up-down |
+| Move | `WASD` pan (across the view plane) | `WASD` move, `Space`/`Ctrl` up-down |
 | Pan / zoom | MMB drag / scroll | n/a |
 
 **Building**

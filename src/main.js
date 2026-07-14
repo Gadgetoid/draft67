@@ -22,7 +22,7 @@ const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
 camera.position.set(7, 6, 9);
 
 const world = new VoxelWorld(scene);
-const rig = new CameraRig(camera, canvas);
+const rig = new CameraRig(camera, canvas, world);
 const ui = new UI(() => {});
 
 // Mobile (touch) layout + a tap edits using the Add/Del brush instead of mouse buttons.
