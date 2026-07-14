@@ -149,6 +149,7 @@ html, body {
   cursor: pointer;
 }
 #toolbar button:hover { background: var(--ink); color: var(--paper); }
+#toolbar button.active { background: var(--ink); color: var(--paper); } /* toggled on (e.g. Chamfer) */
 
 /* Blueprint preview bar */
 #blueprint-bar {
@@ -239,9 +240,10 @@ body.mobile #viewport { touch-action: none; }        /* gestures drive the camer
 /* full-bleed: drop the drafting-sheet frame */
 body.mobile #sheet { inset: 0; border: none; box-shadow: none; }
 
-/* no keyboard on mobile: hide hints, first-person toggle, and the corner title block */
+/* no keyboard on mobile: hide hints, first-person toggle, desktop chamfer btn, corner title block */
 body.mobile #hints,
 body.mobile #btn-mode,
+body.mobile #btn-chamfer,
 body.mobile #titleblock { display: none; }
 
 /* brand name along the top */

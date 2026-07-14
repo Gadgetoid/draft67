@@ -6,6 +6,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { Fn, uniform, vec2, positionWorld, fract, min, max, abs, dFdx, dFdy, length, smoothstep, float } from 'three/tsl';
 import { MATERIALS, makeHatchTexture, makeBayerTexture } from './materials.js';
 import { makeHatchMaterial } from './hatchMaterial.js';
+import { buildChamferGeometry } from './chamfer.js';
 import { inkColor } from './theme.js';
 
 const GROUND_SIZE = 400;
@@ -21,7 +22,12 @@ export class VoxelWorld {
   constructor(scene) {
     this.scene = scene;
     this.voxels = new Map(); // "x,y,z" -> materialId
+    this.cuts = new Map();   // "x,y,z" -> Map(elementId -> amount)  (chamfered blocks only)
+    this.shaped = new Map(); // "x,y,z" -> THREE.Mesh (individual mesh for a chamfered block)
+    this.chamferBudget = 3.0; // hard cap on the SUM of a block's cut amounts (stops carving to nothing)
     this.group = new THREE.Group();
+    this.shapedGroup = new THREE.Group();
+    this.group.add(this.shapedGroup);
     scene.add(this.group);
 
     // Build plane at y=-0.5 (top of the y=0 block layer). Procedural single-line grid, aligned
@@ -92,6 +98,15 @@ export class VoxelWorld {
     const k = key(x, y, z);
     const existing = this.voxels.get(k);
     if (existing === materialId) return;
+    if (this.shaped.has(k)) {                 // chamfered block: keep its shape, swap material
+      this.voxels.set(k, materialId);
+      const e = this.meshes.get(materialId);
+      const mesh = this.shaped.get(k);
+      mesh.material = e.mat;
+      mesh.userData.materialId = materialId;
+      mesh.userData.idMaterial = e.idMaterial;
+      return;
+    }
     if (existing !== undefined) this._removeInstance(existing, k);
     this.voxels.set(k, materialId);
     this._addInstance(materialId, k, x, y, z);
@@ -102,11 +117,15 @@ export class VoxelWorld {
     const mid = this.voxels.get(k);
     if (mid === undefined) return;
     this.voxels.delete(k);
-    this._removeInstance(mid, k);
+    if (this.shaped.has(k)) { this._disposeShaped(k); this.cuts.delete(k); }
+    else this._removeInstance(mid, k);
   }
 
   clear() {
     this.voxels.clear();
+    this.cuts.clear();
+    for (const mesh of this.shaped.values()) { this.shapedGroup.remove(mesh); mesh.geometry.dispose(); }
+    this.shaped.clear();
     for (const e of this.meshes.values()) {
       e.mesh.count = 0;
       e.mesh.instanceMatrix.needsUpdate = true;
@@ -114,6 +133,52 @@ export class VoxelWorld {
       e.keyToIndex.clear();
       e.indexToKey.length = 0;
     }
+  }
+
+  // --- chamfering (shaped blocks) --------------------------------------------------------------
+  getCuts(x, y, z) { return this.cuts.get(key(x, y, z)) || new Map(); }
+
+  setCut(x, y, z, elementId, amount) {
+    const k = key(x, y, z);
+    if (!this.voxels.has(k)) return;
+    let cm = this.cuts.get(k) || new Map();
+    if (amount > 0) cm.set(elementId, amount); else cm.delete(elementId);
+    if (cm.size === 0) { this.cuts.delete(k); this._toFull(k); }
+    else { this.cuts.set(k, cm); this._toShaped(k); }
+  }
+
+  _toShaped(k) {
+    const mid = this.voxels.get(k);
+    const [x, y, z] = k.split(',').map(Number);
+    const geo = buildChamferGeometry(this.cuts.get(k));
+    let mesh = this.shaped.get(k);
+    if (mesh) { mesh.geometry.dispose(); mesh.geometry = geo; return; }
+    const e = this.meshes.get(mid);
+    if (e.keyToIndex.has(k)) this._removeInstance(mid, k); // pull out of the instanced mesh
+    mesh = new THREE.Mesh(geo, e.mat);
+    mesh.position.set(x, y, z);
+    mesh.frustumCulled = false;
+    mesh.userData.voxelKey = k;
+    mesh.userData.materialId = mid;
+    mesh.userData.idMaterial = e.idMaterial;
+    this.shapedGroup.add(mesh);
+    this.shaped.set(k, mesh);
+  }
+
+  _toFull(k) {
+    this._disposeShaped(k);
+    const mid = this.voxels.get(k);
+    if (mid === undefined) return;
+    const [x, y, z] = k.split(',').map(Number);
+    this._addInstance(mid, k, x, y, z);
+  }
+
+  _disposeShaped(k) {
+    const mesh = this.shaped.get(k);
+    if (!mesh) return;
+    this.shapedGroup.remove(mesh);
+    mesh.geometry.dispose();
+    this.shaped.delete(k);
   }
 
   _addInstance(materialId, k, x, y, z) {
@@ -172,22 +237,31 @@ export class VoxelWorld {
   // Ray pick -> { place:[x,y,z], remove:[x,y,z]|null } or null.
   // Nearest hit wins: a block face places on the neighbouring cell (and can be removed);
   // the ground plane places on that grid cell at y=0 (and cannot be removed).
+  // Ray pick -> { place, remove:[x,y,z]|null, coord:[x,y,z]|null, local:{x,y,z}|null } or null.
   pick(raycaster) {
     const targets = [...this.meshes.values()].map((e) => e.mesh);
+    for (const m of this.shaped.values()) targets.push(m);
     targets.push(this.ground);
     const hits = raycaster.intersectObjects(targets, false);
     for (const h of hits) {
       if (h.object === this.ground) {
-        return { place: [Math.round(h.point.x), 0, Math.round(h.point.z)], remove: null };
+        return { place: [Math.round(h.point.x), 0, Math.round(h.point.z)], remove: null, coord: null, local: null };
       }
-      if (h.instanceId == null) continue;
-      const entry = this.meshes.get(h.object.userData.materialId);
-      const k = entry.indexToKey[h.instanceId];
-      if (k === undefined) continue;
+      let k;
+      if (h.object.userData.voxelKey !== undefined) {       // a chamfered (shaped) block
+        k = h.object.userData.voxelKey;
+      } else {
+        if (h.instanceId == null) continue;
+        k = this.meshes.get(h.object.userData.materialId).indexToKey[h.instanceId];
+        if (k === undefined) continue;
+      }
       const c = k.split(',').map(Number);
-      const n = h.face.normal; // local == world (axis-aligned, translation-only)
-      const normal = [Math.round(n.x), Math.round(n.y), Math.round(n.z)];
-      return { place: [c[0] + normal[0], c[1] + normal[1], c[2] + normal[2]], remove: c };
+      // dominant-axis normal so placement stays cardinal even off a diagonal chamfer face
+      const n = h.face.normal, na = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+      const ai = na[0] >= na[1] && na[0] >= na[2] ? 0 : (na[1] >= na[2] ? 1 : 2);
+      const normal = [0, 0, 0];
+      normal[ai] = Math.sign([n.x, n.y, n.z][ai]) || 1;
+      return { place: [c[0] + normal[0], c[1] + normal[1], c[2] + normal[2]], remove: c, coord: c };
     }
     return null;
   }
@@ -195,7 +269,10 @@ export class VoxelWorld {
   toJSON() {
     return [...this.voxels].map(([k, mid]) => {
       const [x, y, z] = k.split(',').map(Number);
-      return { x, y, z, m: mid };
+      const o = { x, y, z, m: mid };
+      const cm = this.cuts.get(k);
+      if (cm && cm.size) o.c = Object.fromEntries(cm);
+      return o;
     });
   }
   fromJSON(arr) {
@@ -206,6 +283,7 @@ export class VoxelWorld {
         throw new Error('invalid model: bad block entry');
       }
       this.set(b.x, b.y, b.z, b.m);
+      if (b.c) for (const [el, amt] of Object.entries(b.c)) this.setCut(b.x, b.y, b.z, el, amt);
     }
   }
 }

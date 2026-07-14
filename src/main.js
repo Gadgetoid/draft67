@@ -1,7 +1,7 @@
 // Draft'67 ⸻ 1-bit voxel drafting engine. Bootstrap + render loop.
 import * as THREE from 'three';
-import { WebGPURenderer } from 'three/webgpu';
-import { applyTheme, toggleTheme, currentTheme } from './theme.js';
+import { WebGPURenderer, MeshBasicNodeMaterial } from 'three/webgpu';
+import { applyTheme, toggleTheme, currentTheme, inkColor } from './theme.js';
 import { VoxelWorld } from './world.js';
 import { CameraRig } from './controls.js';
 import { UI } from './ui.js';
@@ -28,7 +28,9 @@ const ui = new UI(() => {});
 // Mobile (touch) layout + a tap edits using the Add/Del brush instead of mouse buttons.
 const isMobile = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('mobile', isMobile);
-let brush = 'add';
+let brush = 'add';            // mobile tap tool: add | del | chamfer
+let chamferMode = false;      // desktop: 'c' toggles chamfer editing
+const getChamfer = () => chamferMode || brush === 'chamfer';
 
 // debug handles (used by the headless verifier)
 window.__THREE = THREE;
@@ -51,20 +53,81 @@ addEventListener('resize', resize);
 
 function refreshHud() { ui.setCount(world.size); autosave(world); }
 
-attachInteraction({ dom: canvas, world, rig, ui, onChange: refreshHud, getBrush: () => brush });
+// Subtle 1-bit highlight of the edge/corner being targeted in chamfer mode: a thin ink bar
+// (theme-coloured) laid along the element. Excluded from the outline passes.
+const hlMat = new MeshBasicNodeMaterial();
+hlMat.colorNode = inkColor;
+hlMat.depthTest = false;
+hlMat.depthWrite = false;
+const highlight = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), hlMat);
+highlight.visible = false;
+highlight.renderOrder = 3;
+highlight.userData.excludeFromOutline = true;
+scene.add(highlight);
+
+// faint translucent "ghost" of the full unit cube, to show the original bounds being chamfered
+const ghostMat = new MeshBasicNodeMaterial();
+ghostMat.colorNode = inkColor;
+ghostMat.transparent = true;
+ghostMat.opacity = 0.16;
+ghostMat.depthWrite = false;
+const ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), ghostMat);
+ghost.scale.setScalar(1.02); // slightly proud of the block so it doesn't z-fight coplanar faces
+ghost.visible = false;
+ghost.userData.excludeFromOutline = true;
+scene.add(ghost);
+
+const AXI = { x: 0, y: 1, z: 2 };
+function showHighlight(coord, elementId) {
+  if (!coord || !elementId) { highlight.visible = false; ghost.visible = false; return; }
+  ghost.position.set(coord[0], coord[1], coord[2]);
+  ghost.visible = true;
+  const parts = elementId.split('|');
+  const pos = [coord[0], coord[1], coord[2]];
+  if (parts[0] === 'e') {
+    const a0 = AXI[parts[1][0]], a1 = AXI[parts[1][1]], free = 3 - a0 - a1;
+    pos[a0] += parts[2][0] === '+' ? 0.5 : -0.5;
+    pos[a1] += parts[2][1] === '+' ? 0.5 : -0.5;
+    const sc = [0.07, 0.07, 0.07]; sc[free] = 1.02;
+    highlight.scale.set(sc[0], sc[1], sc[2]);
+  } else {
+    const s = parts[1];
+    pos[0] += s[0] === '+' ? 0.5 : -0.5;
+    pos[1] += s[1] === '+' ? 0.5 : -0.5;
+    pos[2] += s[2] === '+' ? 0.5 : -0.5;
+    highlight.scale.set(0.16, 0.16, 0.16);
+  }
+  highlight.position.set(pos[0], pos[1], pos[2]);
+  highlight.visible = true;
+}
+
+attachInteraction({
+  dom: canvas, world, rig, ui, onChange: refreshHud,
+  getBrush: () => brush, getChamfer, onHover: showHighlight,
+});
 
 // --- toolbar wiring ---
 const $ = (id) => document.getElementById(id);
 $('btn-mode').addEventListener('click', () => { rig.toggle(); syncModeUi(); });
 
-// Add / Del brush (mobile): mutually-exclusive tap tool
+// Add / Del / Chamfer brush (mobile): mutually-exclusive tap tool
 function setBrush(m) {
   brush = m;
   $('brush-add').classList.toggle('active', m === 'add');
   $('brush-del').classList.toggle('active', m === 'del');
+  $('brush-chamfer').classList.toggle('active', m === 'chamfer');
 }
 $('brush-add').addEventListener('click', () => setBrush('add'));
 $('brush-del').addEventListener('click', () => setBrush('del'));
+$('brush-chamfer').addEventListener('click', () => setBrush('chamfer'));
+
+// Chamfer mode (desktop): 'c' or the toolbar button toggles edge/corner editing
+function setChamferMode(on) {
+  chamferMode = on;
+  $('btn-chamfer').classList.toggle('active', on);
+  if (!on) showHighlight(null);
+}
+$('btn-chamfer').addEventListener('click', () => setChamferMode(!chamferMode));
 
 // model bounds for framing the blueprint camera
 function modelBounds() {
@@ -145,6 +208,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (rig.blueprint) { if (e.code === 'Escape') exitBlueprint(); return; }
   if (e.code === 'Tab') { e.preventDefault(); rig.toggle(); syncModeUi(); }
+  else if (e.code === 'KeyC') setChamferMode(!chamferMode);   // toggle chamfer editing
   else if (/^(Digit|Numpad)\d$/.test(e.code)) ui.selectByKey(e.code.slice(-1));
   else if (e.code.startsWith('Key')) ui.selectByKey(e.code.slice(3).toLowerCase()); // y/u/i/o/p etc.
 });

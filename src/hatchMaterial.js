@@ -5,7 +5,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   Fn, vec2, vec3, float, uniform, texture, positionWorld, normalWorld,
   screenCoordinate, abs, dot, max, fract, mix, step, sin, cos, clamp,
-  normalize, pow,
+  normalize,
 } from 'three/tsl';
 import { inkColor, paperColor } from './theme.js';
 
@@ -30,11 +30,13 @@ export function makeHatchMaterial(hatchTex, bayerTex, opts = {}) {
   mat.colorNode = Fn(() => {
     const p = positionWorld;
     const n = normalWorld;
-    const an = abs(n);
-    // sharpen triplanar weights so each face reads as a single projection
-    const w0 = pow(an, vec3(6.0));
-    const wsum = w0.x.add(w0.y).add(w0.z).add(1e-4);
-    const w = w0.div(wsum);
+    // HARD-select the single dominant axis (not a blend), so an angled chamfer face shows one clean
+    // hatch instead of two/three overlapping projections. The tiny per-axis bias gives a decisive
+    // priority (x > y > z) so a 45-degree tie resolves cleanly instead of fighting.
+    const an = abs(n).mul(vec3(1.0, 0.999, 0.998));
+    const wx = step(an.y, an.x).mul(step(an.z, an.x));
+    const wy = step(an.z, an.y).mul(step(an.x, an.y)).mul(wx.oneMinus());
+    const wz = wx.oneMinus().mul(wy.oneMinus());
 
     // three projections. Diagonal-hatch materials rotate per axis (depth cue); rectilinear
     // materials (brick/stone/wood/liquid) stay axis-aligned so courses read consistently.
@@ -42,7 +44,7 @@ export function makeHatchMaterial(hatchTex, bayerTex, opts = {}) {
     const sx = sampleHatch(hatchTex, p.zy, float(rx), scale);
     const sy = sampleHatch(hatchTex, p.xz, float(ry), scale);
     const sz = sampleHatch(hatchTex, p.xy, float(rz), scale);
-    const cover = sx.mul(w.x).add(sy.mul(w.y)).add(sz.mul(w.z));
+    const cover = sx.mul(wx).add(sy.mul(wy)).add(sz.mul(wz));
     const hatchInk = step(0.3, cover);
 
     // flat directional tone -> screen-space ordered dither for a stronger depth cue

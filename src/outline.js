@@ -101,7 +101,7 @@ export class OutlinePipeline {
     // 3) flat per-material id (swap each mesh to its id material, then restore)
     const swapped = [];
     scene.traverse((o) => {
-      if (o.isInstancedMesh && o.userData.idMaterial) {
+      if (o.userData.idMaterial) {
         swapped.push([o, o.material]);
         o.material = o.userData.idMaterial;
       }
@@ -136,7 +136,7 @@ export class OutlinePipeline {
 
     const swapped = [];
     scene.traverse((o) => {
-      if (o.isInstancedMesh && o.userData.idMaterial) { swapped.push([o, o.material]); o.material = o.userData.idMaterial; }
+      if (o.userData.idMaterial) { swapped.push([o, o.material]); o.material = o.userData.idMaterial; }
     });
     r.setRenderTarget(this.idRT);
     await r.renderAsync(scene, camera);
