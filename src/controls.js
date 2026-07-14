@@ -35,28 +35,29 @@ export class CameraRig {
     addEventListener('keydown', (e) => this.keys.add(e.code));
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this._tmp = new THREE.Vector3();
-    this._fwd = new THREE.Vector3();
+    this._up = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._move = new THREE.Vector3();
     this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
   }
 
-  // WASD flies the pivot through the scene along the CAMERA's view axes (move camera and orbit
-  // target together so the view angle is preserved). Used in orbit mode.
+  // WASD pans the camera across its view plane (A/D along camera-right, W/S along camera-up),
+  // moving camera and orbit target together so the view angle and distance are preserved. It does
+  // NOT dolly in/out along the forward axis. Used in orbit mode.
   _flyOrbit(dt) {
     const k = this.keys;
-    let f = 0, s = 0;
-    if (k.has('KeyW')) f += 1;
-    if (k.has('KeyS')) f -= 1;
+    let u = 0, s = 0;
+    if (k.has('KeyW')) u += 1;
+    if (k.has('KeyS')) u -= 1;
     if (k.has('KeyD')) s += 1;
     if (k.has('KeyA')) s -= 1;
-    if (!f && !s) return;
+    if (!u && !s) return;
     const d = this.speed * dt;
     this.camera.updateMatrixWorld();
-    this.camera.getWorldDirection(this._fwd).normalize();               // full view direction
     this._right.setFromMatrixColumn(this.camera.matrixWorld, 0).normalize(); // camera right
+    this._up.setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();    // camera up
     this._move.set(0, 0, 0)
-      .addScaledVector(this._fwd, f * d)
+      .addScaledVector(this._up, u * d)
       .addScaledVector(this._right, s * d);
     this.camera.position.add(this._move);
     this.orbit.target.add(this._move);
