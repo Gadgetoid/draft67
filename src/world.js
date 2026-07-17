@@ -93,6 +93,20 @@ export class VoxelWorld {
   has(x, y, z) { return this.voxels.has(key(x, y, z)); }
   get size() { return this.voxels.size; }
 
+  // model bounds (centre + bounding-sphere radius) for framing cameras; a default box when empty
+  bounds() {
+    const box = new THREE.Box3();
+    for (const k of this.voxels.keys()) {
+      const [x, y, z] = k.split(',').map(Number);
+      box.expandByPoint(_v.set(x - 0.5, y - 0.5, z - 0.5));
+      box.expandByPoint(_v.set(x + 0.5, y + 0.5, z + 0.5));
+    }
+    if (this.voxels.size === 0) box.set(new THREE.Vector3(-3, -1, -3), new THREE.Vector3(3, 3, 3));
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = box.getBoundingSphere(new THREE.Sphere()).radius;
+    return { center, radius };
+  }
+
   // Incremental edits: O(1) per block (append / swap-remove), not a full per-material rebuild.
   set(x, y, z, materialId) {
     const k = key(x, y, z);

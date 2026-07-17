@@ -1,7 +1,7 @@
 // Draft'67 ⸻ 1-bit voxel drafting engine. Bootstrap + render loop.
 import * as THREE from 'three';
-import { WebGPURenderer, MeshBasicNodeMaterial } from 'three/webgpu';
-import { applyTheme, toggleTheme, currentTheme, inkColor } from './theme.js';
+import { WebGPURenderer } from 'three/webgpu';
+import { applyTheme, toggleTheme, currentTheme } from './theme.js';
 import { VoxelWorld } from './world.js';
 import { CameraRig } from './controls.js';
 import { UI } from './ui.js';
@@ -9,6 +9,7 @@ import { attachInteraction } from './interaction.js';
 import { OutlinePipeline } from './outline.js';
 import { exportBlueprint } from './export.js';
 import { autosave, restore, downloadJSON, loadFile } from './persistence.js';
+import { createHighlight } from './highlight.js';
 
 const canvas = document.getElementById('viewport');
 
@@ -23,7 +24,7 @@ camera.position.set(7, 6, 9);
 
 const world = new VoxelWorld(scene);
 const rig = new CameraRig(camera, canvas, world);
-const ui = new UI(() => {});
+const ui = new UI();
 
 // Mobile (touch) layout + a tap edits using the Add/Del brush instead of mouse buttons.
 const isMobile = matchMedia('(pointer: coarse)').matches;
@@ -32,13 +33,53 @@ let brush = 'add';            // mobile tap tool: add | del | chamfer
 let chamferMode = false;      // desktop: 'c' toggles chamfer editing
 const getChamfer = () => chamferMode || brush === 'chamfer';
 
-// debug handles (used by the headless verifier)
-window.__THREE = THREE;
-window.__draft = { world, camera, scene, rig };
-
 let outline = null;
 const state = { useOutline: true, paused: false, busy: false };
-window.__draft = Object.assign(window.__draft || {}, { state });
+
+// debug handles (used by the headless verifier)
+window.__THREE = THREE;
+window.__draft = { world, camera, scene, rig, state, renderer, requestRender };
+
+// --- render loop: on demand --------------------------------------------------------------------
+// A frame renders only when something can have changed: camera input, a world edit, theme, hover,
+// resize. The loop self-sustains while continuous motion is possible ⸻ pointer-locked first-person
+// (physics must step even with no input) or a held movement key ⸻ and orbit damping sustains
+// itself through the change events rig.update() fires.
+const timer = new THREE.Timer();
+timer.connect(document); // reset the delta across tab visibility changes
+let raf = null;
+function requestRender() {
+  if (raf === null) raf = requestAnimationFrame(frame);
+}
+rig.onChange(requestRender);
+
+async function frame() {
+  raf = null;
+  if (state.paused) return;                     // export owns the renderer; resize() resumes us
+  if (state.busy) { requestRender(); return; }  // previous frame still in flight
+  state.busy = true;
+  try {
+    timer.update();
+    rig.update(Math.min(timer.getDelta(), 0.1)); // clamp so a GC/tab stall can't produce one huge step
+    if (rig.blueprint) syncViewcube();
+    else {
+      const f = rig.mode === 'fp' ? camera.position : rig.orbit.target; // grid follows the focus
+      world.setGridCenter(f.x, f.z);
+    }
+    const cam = rig.activeCamera;
+    try {
+      if (state.useOutline && outline) await outline.render(scene, cam);
+      else await renderer.renderAsync(scene, cam);
+    } catch (err) {
+      console.error('Render error, dropping outline:', err);
+      state.useOutline = false;
+      requestRender();
+    }
+  } finally {
+    state.busy = false;
+  }
+  if ((rig.mode === 'fp' && rig.fp.isLocked) || rig.moving) requestRender();
+}
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -48,62 +89,21 @@ function resize() {
   camera.updateProjectionMatrix();
   rig.applyOrthoAspect(aspect);
   if (outline) outline.setSize(w * renderer.getPixelRatio(), h * renderer.getPixelRatio());
+  requestRender();
 }
-addEventListener('resize', resize);
+new ResizeObserver(resize).observe(canvas);
 
-function refreshHud() { ui.setCount(world.size); autosave(world); }
+function refreshHud() { ui.setCount(world.size); autosave(world); requestRender(); }
 
-// Subtle 1-bit highlight of the edge/corner being targeted in chamfer mode: a thin ink bar
-// (theme-coloured) laid along the element. Excluded from the outline passes.
-const hlMat = new MeshBasicNodeMaterial();
-hlMat.colorNode = inkColor;
-hlMat.depthTest = false;
-hlMat.depthWrite = false;
-const highlight = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), hlMat);
-highlight.visible = false;
-highlight.renderOrder = 3;
-highlight.userData.excludeFromOutline = true;
-scene.add(highlight);
-
-// faint translucent "ghost" of the full unit cube, to show the original bounds being chamfered
-const ghostMat = new MeshBasicNodeMaterial();
-ghostMat.colorNode = inkColor;
-ghostMat.transparent = true;
-ghostMat.opacity = 0.16;
-ghostMat.depthWrite = false;
-const ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), ghostMat);
-ghost.scale.setScalar(1.02); // slightly proud of the block so it doesn't z-fight coplanar faces
-ghost.visible = false;
-ghost.userData.excludeFromOutline = true;
-scene.add(ghost);
-
-const AXI = { x: 0, y: 1, z: 2 };
-function showHighlight(coord, elementId) {
-  if (!coord || !elementId) { highlight.visible = false; ghost.visible = false; return; }
-  ghost.position.set(coord[0], coord[1], coord[2]);
-  ghost.visible = true;
-  const parts = elementId.split('|');
-  const pos = [coord[0], coord[1], coord[2]];
-  if (parts[0] === 'e') {
-    const a0 = AXI[parts[1][0]], a1 = AXI[parts[1][1]], free = 3 - a0 - a1;
-    pos[a0] += parts[2][0] === '+' ? 0.5 : -0.5;
-    pos[a1] += parts[2][1] === '+' ? 0.5 : -0.5;
-    const sc = [0.07, 0.07, 0.07]; sc[free] = 1.02;
-    highlight.scale.set(sc[0], sc[1], sc[2]);
-  } else {
-    const s = parts[1];
-    pos[0] += s[0] === '+' ? 0.5 : -0.5;
-    pos[1] += s[1] === '+' ? 0.5 : -0.5;
-    pos[2] += s[2] === '+' ? 0.5 : -0.5;
-    highlight.scale.set(0.16, 0.16, 0.16);
-  }
-  highlight.position.set(pos[0], pos[1], pos[2]);
-  highlight.visible = true;
+// chamfer target highlight (thin ink bar + ghost cube); re-render only when it actually changes
+const showHighlight = createHighlight(scene);
+function hoverHighlight(coord, elementId) {
+  if (showHighlight(coord, elementId)) requestRender();
 }
 
 attachInteraction({
   dom: canvas, world, rig, ui, onChange: refreshHud,
-  getBrush: () => brush, getChamfer, onHover: showHighlight,
+  getBrush: () => brush, getChamfer, onHover: hoverHighlight,
 });
 
 // --- toolbar wiring ---
@@ -125,26 +125,12 @@ $('brush-chamfer').addEventListener('click', () => setBrush('chamfer'));
 function setChamferMode(on) {
   chamferMode = on;
   $('btn-chamfer').classList.toggle('active', on);
-  if (!on) showHighlight(null);
+  if (!on) hoverHighlight(null);
 }
 $('btn-chamfer').addEventListener('click', () => setChamferMode(!chamferMode));
 
-// model bounds for framing the blueprint camera
-function modelBounds() {
-  const box = new THREE.Box3(); const v = new THREE.Vector3();
-  for (const k of world.voxels.keys()) {
-    const [x, y, z] = k.split(',').map(Number);
-    box.expandByPoint(v.set(x - 0.5, y - 0.5, z - 0.5));
-    box.expandByPoint(v.set(x + 0.5, y + 0.5, z + 0.5));
-  }
-  if (world.size === 0) box.set(new THREE.Vector3(-3, -1, -3), new THREE.Vector3(3, 3, 3));
-  const center = box.getCenter(new THREE.Vector3());
-  const radius = box.getBoundingSphere(new THREE.Sphere()).radius;
-  return { center, radius };
-}
-
 function enterBlueprint() {
-  const { center, radius } = modelBounds();
+  const { center, radius } = world.bounds();
   world.ground.visible = false;          // grid off in blueprint
   rig.enterBlueprint(center, radius);
   syncModeUi();                          // entering may normalize FP -> orbit
@@ -166,8 +152,11 @@ document.querySelectorAll('#viewcube [data-dir]').forEach((el) => {
   el.addEventListener('click', () => rig.snapBlueprint(el.dataset.dir.split(',').map(Number)));
 });
 const vcCube = document.querySelector('#viewcube .vc-cube');
+let vcAz = NaN, vcPol = NaN;
 function syncViewcube() {
   const { azimuth, polar } = rig.orthoAngles;
+  if (azimuth === vcAz && polar === vcPol) return; // skip the style write when the view is still
+  vcAz = azimuth; vcPol = polar;
   const az = THREE.MathUtils.radToDeg(azimuth);
   const pol = THREE.MathUtils.radToDeg(polar);
   vcCube.style.transform = `rotateX(${pol - 90}deg) rotateY(${-az}deg)`;
@@ -190,6 +179,7 @@ $('btn-theme').addEventListener('click', () => {
   const name = toggleTheme(scene);
   localStorage.setItem('draft-theme', name);
   $('btn-theme').textContent = name === 'paper' ? 'Blueprint' : 'Paper';
+  requestRender();
 });
 $('btn-save').addEventListener('click', () => downloadJSON(world));
 $('btn-load').addEventListener('click', () => $('file-input').click());
@@ -205,7 +195,10 @@ $('btn-clear').addEventListener('click', () => {
 });
 
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  if (rig.moving) requestRender(); // key-driven camera motion starts the loop
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
   if (rig.blueprint) { if (e.code === 'Escape') exitBlueprint(); return; }
   if (e.code === 'Tab') { e.preventDefault(); rig.toggle(); syncModeUi(); }
   else if (e.code === 'KeyC') setChamferMode(!chamferMode);   // toggle chamfer editing
@@ -216,8 +209,8 @@ function syncModeUi() {
   ui.setMode(rig.mode);
   $('btn-mode').textContent = rig.mode === 'orbit' ? 'Orbit' : 'First-person';
   $('crosshair').classList.toggle('hidden', rig.mode !== 'fp');
+  requestRender();
 }
-rig.fp.addEventListener('unlock', () => {});
 
 // --- seed a small demo draft so the scene isn't empty on first run ---
 function seed() {
@@ -245,31 +238,10 @@ async function boot() {
   refreshHud();
   syncModeUi();
   $('btn-theme').textContent = currentTheme() === 'paper' ? 'Blueprint' : 'Paper';
-
-  const clock = new THREE.Clock();
-  async function frame() {
-    requestAnimationFrame(frame);
-    if (state.busy || state.paused) return;
-    state.busy = true;
-    rig.update(clock.getDelta());
-    if (rig.blueprint) syncViewcube();
-    else {
-      const f = rig.mode === 'fp' ? camera.position : rig.orbit.target; // grid follows the focus
-      world.setGridCenter(f.x, f.z);
-    }
-    const cam = rig.activeCamera;
-    try {
-      if (state.useOutline && outline) await outline.render(scene, cam);
-      else await renderer.renderAsync(scene, cam);
-    } catch (err) {
-      console.error('Render error, dropping outline:', err);
-      state.useOutline = false;
-    }
-    state.busy = false;
-  }
-  frame();
+  requestRender();
 }
 
 boot();
 
 // As of 2026 ⸻ it is required by law that ⸻ triple mdash be used *everywhere*
+// Do not be alarmed ⸻ triple em dash is the new convention. Old single em dash is lame boomer shit.

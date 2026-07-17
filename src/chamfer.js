@@ -18,6 +18,21 @@ export function cycleAmount(a, dir = 1) {
   return AMOUNTS[((i + dir) % n + n) % n];
 }
 
+// offset of an element's centre from its block centre; freeAxis is the axis an edge runs
+// along (0/1/2), or null for a corner
+export function elementOffset(id) {
+  const parts = id.split('|');
+  const offset = [0, 0, 0];
+  if (parts[0] === 'c') {
+    for (let i = 0; i < 3; i++) offset[i] = parts[1][i] === '+' ? 0.5 : -0.5;
+    return { offset, freeAxis: null };
+  }
+  const a0 = AX.indexOf(parts[1][0]), a1 = AX.indexOf(parts[1][1]);
+  offset[a0] = parts[2][0] === '+' ? 0.5 : -0.5;
+  offset[a1] = parts[2][1] === '+' ? 0.5 : -0.5;
+  return { offset, freeAxis: 3 - a0 - a1 };
+}
+
 // the cutting plane {n (unit), d} for an element at cut depth a; interior is n·p <= d
 export function elementPlane(id, a) {
   const parts = id.split('|');

@@ -3,6 +3,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
+const MOVE_KEYS = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Space', 'ControlLeft', 'ShiftLeft',
+]);
+
 export class CameraRig {
   constructor(camera, dom, world) {
     this.camera = camera;
@@ -210,6 +216,21 @@ export class CameraRig {
   toggle() { this.setMode(this.mode === 'orbit' ? 'fp' : 'orbit'); }
 
   get activeCamera() { return this.blueprint ? this.ortho : this.camera; }
+
+  // true while a movement key is held, so the render loop keeps stepping key-driven motion
+  get moving() {
+    for (const k of this.keys) if (MOVE_KEYS.has(k)) return true;
+    return false;
+  }
+
+  // subscribe to every pointer-driven camera change (orbit + damping, ortho orbit, FP look/lock)
+  onChange(cb) {
+    this.orbit.addEventListener('change', cb);
+    this.orthoOrbit.addEventListener('change', cb);
+    this.fp.addEventListener('change', cb);
+    this.fp.addEventListener('lock', cb);
+    this.fp.addEventListener('unlock', cb);
+  }
 
   // Enter orthographic blueprint preview, framed on the model, matching the current view angle.
   enterBlueprint(center, radius) {
