@@ -9,7 +9,7 @@ import { nearestElement, elementOffset, AMOUNTS } from './chamfer.js';
 
 const STEP_PX = 30; // drag distance per amount step
 
-export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add', getChamfer = () => false, onHover = () => {}, onSelection = () => {} }) {
+export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add', getChamfer = () => false, getPaint = () => false, onHover = () => {}, onSelection = () => {}, onPlace = () => {} }) {
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const _pe = new THREE.Vector3(), _pc = new THREE.Vector3();
@@ -180,6 +180,27 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     return false;
   }
 
+  // Paint: reswatch the targeted block to the selected material (keeps its shape).
+  function paint() {
+    if (rig.blueprint) return false;
+    const hit = world.pick(ray);
+    if (!hit || !hit.remove) return false;
+    const c = hit.remove;
+    if (world.material(...c) === ui.material) return false;
+    world.set(c[0], c[1], c[2], ui.material);
+    onChange?.();
+    return true;
+  }
+
+  // Ghost preview of the target under the pointer in build (empty cell) and paint
+  // (existing block) modes. Returns null in chamfer mode or over empty space.
+  function previewCoord() {
+    const hit = world.pick(ray);
+    if (!hit) return null;
+    if (getPaint()) return hit.remove || null;
+    return hit.place && !world.has(...hit.place) ? hit.place : null;
+  }
+
   // Orbit mode: a clean single-pointer tap (no drag) edits. Track pointer count so multi-touch
   // gestures (pinch-zoom, two-finger pan) never place/remove a block.
   dom.addEventListener('pointerdown', (e) => {
@@ -215,16 +236,23 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     return info;
   }
   dom.addEventListener('pointercancel', (e) => { endPointer(e); chamEnd(); });
-  // chamfer-mode hover: highlight the edge/corner under the cursor (skip while a pointer is down)
+  // Hover preview (skip while a pointer is down): chamfer edge/corner bars, or a
+  // ghost cube at the build/paint target.
   dom.addEventListener('pointermove', (e) => {
     if (cham) { chamDrag(e); return; }
-    if (rig.mode !== 'orbit' || rig.blueprint || active > 0 || !getChamfer()) { onHover(null); return; }
+    if (rig.mode !== 'orbit' || rig.blueprint || active > 0) { onHover(null); onPlace(null); return; }
     castFromMouse(e);
-    const t = chamferTarget();
-    hover = t;
-    if (t) onHover(t.coord, t.element);
-    else onHover(null);
+    if (getChamfer()) {
+      const t = chamferTarget();
+      hover = t;
+      onHover(t ? t.coord : null, t ? t.element : null);
+      onPlace(null);
+    } else {
+      onHover(null);
+      onPlace(previewCoord());
+    }
   });
+  dom.addEventListener('pointerleave', () => { onHover(null); onPlace(null); });
   dom.addEventListener('pointerup', (e) => {
     const { primary, multi, dist } = endPointer(e);
     if (cham) { if (primary) chamEnd(); return; }
@@ -238,6 +266,7 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
       if ((!hit || !hit.coord) && !e.shiftKey) clearSelection();
       return;
     }
+    if (getPaint() && e.button !== 2) { paint(); return; } // Paint tool: L/tap reswatches
     if (e.pointerType === 'touch') edit(getBrush() === 'del'); // mobile: Add/Del brush
     else edit(e.button === 2 || e.shiftKey);           // desktop: LMB place, RMB / Shift+LMB remove
   });

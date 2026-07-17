@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Draft'67 ⸻ 1-bit voxel drafting engine</title>
+    <link rel="stylesheet" href="/iconfont/pixel-icons.css" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -36,18 +37,87 @@
     </div>
 
     <!-- Material palette / hotbar -->
-    <div id="palette"></div>
+    <div id="palette" class="left"></div>
 
-    <!-- Toolbar -->
+    <!-- Camera mode (mutually exclusive) + edit tools, top-left -->
     <div id="toolbar">
-      <button id="btn-mode" title="Toggle camera (Tab)">Orbit</button>
-      <button id="btn-chamfer" title="Chamfer edges/corners (C): drag on an edge/corner to cut, Shift+Click to multi-select, Esc to deselect">Chamfer</button>
-      <button id="btn-theme" title="Toggle paper / blueprint theme">Blueprint</button>
-      <button id="btn-export" title="Enter blueprint preview + export PNG">Preview</button>
-      <button id="btn-save" title="Save model (JSON)">Save</button>
-      <button id="btn-load" title="Load model (JSON)">Load</button>
-      <button id="btn-clear" title="Clear all blocks">Clear</button>
-      <input id="file-input" type="file" accept="application/json" hidden />
+      <div id="modeswitch" class="seg" role="group" aria-label="Camera mode">
+        <button id="btn-orbit" class="active" title="Orbit camera (Tab)">
+          <i class="pi pi-reload-clockwise" aria-hidden="true"></i><span class="lbl">Orbit</span>
+        </button>
+        <button id="btn-fp" title="First-person walk / fly (Tab)">
+          <i class="pi pi-hiking" aria-hidden="true"></i><span class="lbl">Explore</span>
+        </button>
+      </div>
+      <div id="editswitch" class="seg" role="group" aria-label="Edit tool">
+        <button id="btn-build" class="active" title="Build (B): place (LMB) and remove (RMB) blocks">
+          <i class="pi pi-crafting-smithing-hammer" aria-hidden="true"></i><span class="lbl">Build</span>
+        </button>
+        <button id="btn-chamfer" title="Chamfer edges/corners (C): drag on an edge/corner to cut, Shift+Click to multi-select, Esc to deselect">
+          <i class="pi pi-crafting-chisel" aria-hidden="true"></i><span class="lbl">Chamfer</span>
+        </button>
+        <button id="btn-paint" title="Paint (N): replace the target block's material with the selected one">
+          <i class="pi pi-crafting-roller" aria-hidden="true"></i><span class="lbl">Paint</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Menu, top-right -->
+    <div id="menu">
+      <button id="btn-menu" title="Menu" aria-haspopup="true" aria-expanded="false">
+        <i class="pi pi-buttons-settings" aria-hidden="true"></i>
+      </button>
+      <div id="menu-panel" class="hidden dither-drop" role="menu">
+        <button id="btn-export" role="menuitem" title="Enter blueprint preview + export PNG">
+          <i class="pi pi-image" aria-hidden="true"></i><span>Preview</span>
+        </button>
+        <button id="btn-save" role="menuitem" title="Save model (JSON)">
+          <i class="pi pi-save-disk" aria-hidden="true"></i><span>Save</span>
+        </button>
+        <button id="btn-load" role="menuitem" title="Load model (JSON)">
+          <i class="pi pi-file-open" aria-hidden="true"></i><span>Load</span>
+        </button>
+        <button id="btn-clear" role="menuitem" title="Clear all blocks and start a new draft">
+          <i class="pi pi-file-page-plus-add-new" aria-hidden="true"></i><span>New</span>
+        </button>
+        <div class="menu-sep"></div>
+        <div class="menu-theme" role="group" aria-label="Sheet style">
+          <span class="mt-label">Sheet</span>
+          <div class="mt-opts">
+            <button id="theme-paper" class="mt-swatch" data-theme="paper" title="Paper">
+              <span class="mt-prev prev-paper" aria-hidden="true"></span>Paper
+            </button>
+            <button id="theme-blueprint" class="mt-swatch" data-theme="blueprint" title="Blueprint">
+              <span class="mt-prev prev-blueprint" aria-hidden="true"></span>Blueprint
+            </button>
+          </div>
+        </div>
+        <div class="menu-sep menu-desktop"></div>
+        <div class="menu-theme menu-desktop" role="group" aria-label="Palette position">
+          <span class="mt-label">Palette</span>
+          <div class="mt-opts">
+            <button id="pos-left" class="mt-swatch" data-pos="left" title="Palette on the left">
+              <span class="mt-prev prev-pos-left" aria-hidden="true"></span>Left
+            </button>
+            <button id="pos-bottom" class="mt-swatch" data-pos="bottom" title="Palette at the bottom">
+              <span class="mt-prev prev-pos-bottom" aria-hidden="true"></span>Bottom
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <input id="file-input" type="file" accept="application/json" hidden />
+
+    <!-- House-style confirm dialog (replaces window.confirm) -->
+    <div id="modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-box">
+        <div class="modal-title" id="modal-title">New draft</div>
+        <div class="modal-body">Clear all blocks and start a new draft? This cannot be undone.</div>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="modal-btn">Cancel</button>
+          <button id="modal-ok" class="modal-btn">Clear</button>
+        </div>
+      </div>
     </div>
 
     <!-- Blueprint preview bar (shown only in blueprint mode) -->
@@ -74,7 +144,7 @@
 
     <!-- Help / hints -->
     <div id="hints">
-      <b>LMB</b> place · <b>RMB / Shift+LMB</b> remove · <b>1–0 / Y U I O P</b> material · <b>Tab</b> camera · <b>WASD</b> pan ·
+      <b>LMB</b> place · <b>RMB / Shift+LMB</b> remove · <b>Tab</b> camera · <b>WASD</b> pan ·
       <span class="fp-only"><b>2×Space</b> walk/fly · <b>Space</b> jump / up · <b>Ctrl</b> down · <b>Arrows</b> look · hold LMB paint · Esc release</span>
     </div>
 

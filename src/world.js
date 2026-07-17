@@ -91,6 +91,7 @@ export class VoxelWorld {
   setGridCenter(x, z) { this.gridCenter.value.set(x, z); }
 
   has(x, y, z) { return this.voxels.has(key(x, y, z)); }
+  material(x, y, z) { return this.voxels.get(key(x, y, z)); }
   get size() { return this.voxels.size; }
 
   // model bounds (centre + bounding-sphere radius) for framing cameras; a default box when empty

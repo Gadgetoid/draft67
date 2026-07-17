@@ -82,6 +82,25 @@ export function createHighlight(scene) {
     return true;
   }
 
+  // Build-mode placement preview: a stippled ghost of the block about to be placed.
+  const placeGhost = new THREE.Mesh(geo, ghostMat);
+  placeGhost.scale.setScalar(PROUD);
+  placeGhost.visible = false;
+  placeGhost.renderOrder = 2;
+  placeGhost.userData.excludeFromOutline = true;
+  scene.add(placeGhost);
+
+  let placeKey = null;
+  function place(coord) {
+    const next = coord ? coord.join(',') : null;
+    if (next === placeKey) return false;
+    placeKey = next;
+    if (!coord) { placeGhost.visible = false; return true; }
+    placeGhost.position.set(coord[0], coord[1], coord[2]);
+    placeGhost.visible = true;
+    return true;
+  }
+
   let selectionKey = '';
   function select(items, active = false) {
     const key = items.map((s) => `${s.coord.join(',')}|${s.element}`).join(';') + (active ? '!' : '');
@@ -93,5 +112,5 @@ export function createHighlight(scene) {
     return true;
   }
 
-  return { hover, select };
+  return { hover, select, place };
 }
