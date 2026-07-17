@@ -9,8 +9,9 @@ export function restore(world) {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return false;
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr) && arr.length) { world.fromJSON(arr); return true; }
+    const data = JSON.parse(raw);
+    const blocks = Array.isArray(data) ? data : data?.blocks;
+    if (Array.isArray(blocks) && blocks.length) { world.fromJSON(data); return true; }
   } catch { /* corrupt */ }
   return false;
 }

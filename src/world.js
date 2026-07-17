@@ -248,10 +248,9 @@ export class VoxelWorld {
     return mesh;
   }
 
-  // Ray pick -> { place:[x,y,z], remove:[x,y,z]|null } or null.
+  // Ray pick -> { place:[x,y,z], remove:[x,y,z]|null, coord:[x,y,z]|null, dist } or null.
   // Nearest hit wins: a block face places on the neighbouring cell (and can be removed);
   // the ground plane places on that grid cell at y=0 (and cannot be removed).
-  // Ray pick -> { place, remove:[x,y,z]|null, coord:[x,y,z]|null, local:{x,y,z}|null } or null.
   pick(raycaster) {
     const targets = [...this.meshes.values()].map((e) => e.mesh);
     for (const m of this.shaped.values()) targets.push(m);
@@ -259,7 +258,7 @@ export class VoxelWorld {
     const hits = raycaster.intersectObjects(targets, false);
     for (const h of hits) {
       if (h.object === this.ground) {
-        return { place: [Math.round(h.point.x), 0, Math.round(h.point.z)], remove: null, coord: null, local: null };
+        return { place: [Math.round(h.point.x), 0, Math.round(h.point.z)], remove: null, coord: null, dist: h.distance };
       }
       let k;
       if (h.object.userData.voxelKey !== undefined) {       // a chamfered (shaped) block
@@ -275,21 +274,26 @@ export class VoxelWorld {
       const ai = na[0] >= na[1] && na[0] >= na[2] ? 0 : (na[1] >= na[2] ? 1 : 2);
       const normal = [0, 0, 0];
       normal[ai] = Math.sign([n.x, n.y, n.z][ai]) || 1;
-      return { place: [c[0] + normal[0], c[1] + normal[1], c[2] + normal[2]], remove: c, coord: c };
+      return { place: [c[0] + normal[0], c[1] + normal[1], c[2] + normal[2]], remove: c, coord: c, dist: h.distance };
     }
     return null;
   }
 
   toJSON() {
-    return [...this.voxels].map(([k, mid]) => {
+    const blocks = [...this.voxels].map(([k, mid]) => {
       const [x, y, z] = k.split(',').map(Number);
       const o = { x, y, z, m: mid };
       const cm = this.cuts.get(k);
       if (cm && cm.size) o.c = Object.fromEntries(cm);
       return o;
     });
+    return { v: 2, blocks };
   }
-  fromJSON(arr) {
+  // Accepts { v: 2, blocks } or a legacy bare array. Legacy corner-cut amounts meant a setback
+  // of 1.5x the stored value, so scale them to keep old models' geometry identical.
+  fromJSON(data) {
+    const legacy = Array.isArray(data);
+    const arr = legacy ? data : data?.blocks;
     if (!Array.isArray(arr)) throw new Error('invalid model: expected an array');
     this.clear();
     for (const b of arr) {
@@ -297,7 +301,9 @@ export class VoxelWorld {
         throw new Error('invalid model: bad block entry');
       }
       this.set(b.x, b.y, b.z, b.m);
-      if (b.c) for (const [el, amt] of Object.entries(b.c)) this.setCut(b.x, b.y, b.z, el, amt);
+      if (b.c) for (const [el, amt] of Object.entries(b.c)) {
+        this.setCut(b.x, b.y, b.z, el, legacy && el[0] === 'c' ? amt * 1.5 : amt);
+      }
     }
   }
 }

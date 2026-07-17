@@ -19,10 +19,8 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     ray.setFromCamera(ndc, rig.activeCamera);
   }
 
-  // The element a chamfer hit targets. We ray-test the FULL cube (ghost bounds) at this block as a
-  // proxy, so every original edge/corner stays selectable no matter how the block is already carved
-  // (e.g. a fully-sliced edge, or the corners at the ends of a bevelled edge).
-  function targetElement(coord) {
+  // Ray entry distance into the FULL unit cube at coord (0 if the eye is inside), or null.
+  function cubeEntry(coord) {
     const r = ray.ray, O = [r.origin.x, r.origin.y, r.origin.z], D = [r.direction.x, r.direction.y, r.direction.z];
     let tnear = -Infinity, tfar = Infinity;
     for (let i = 0; i < 3; i++) {
@@ -33,8 +31,17 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
       tnear = Math.max(tnear, t1); tfar = Math.min(tfar, t2);
     }
     if (tnear > tfar || tfar < 0) return null;
-    const t = tnear >= 0 ? tnear : 0; // entry point on the cube surface (0 if the eye is inside)
-    return nearestElement({ x: O[0] + D[0] * t - coord[0], y: O[1] + D[1] * t - coord[1], z: O[2] + D[2] * t - coord[2] });
+    return tnear >= 0 ? tnear : 0;
+  }
+
+  // The element a chamfer hit targets. We ray-test the FULL cube (ghost bounds) at this block as a
+  // proxy, so every original edge/corner stays selectable no matter how the block is already carved
+  // (e.g. a fully-sliced edge, or the corners at the ends of a bevelled edge).
+  function targetElement(coord) {
+    const t = cubeEntry(coord);
+    if (t === null) return null;
+    const r = ray.ray, O = r.origin, D = r.direction;
+    return nearestElement({ x: O.x + D.x * t - coord[0], y: O.y + D.y * t - coord[1], z: O.z + D.z * t - coord[2] });
   }
 
   // chamfer mode: cycle the targeted edge/corner of the block, respecting the total budget.
@@ -100,8 +107,16 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     if (rig.mode !== 'orbit' || active > 0 || !getChamfer()) { onHover(null); return; }
     castFromMouse(e);
     const hit = world.pick(ray);
-    const el = hit && hit.coord ? targetElement(hit.coord) : null;
-    if (el) { hover = { coord: hit.coord, element: el }; onHover(hit.coord, el); }
+    let coord = hit && hit.coord ? hit.coord : null;
+    // Sticky target: a deeply carved block can have no surface left under the cursor, so the
+    // pick ray sails through to whatever is behind. Keep targeting the previous block while its
+    // full cube bounds sit in front of the pick hit, so cut-away edges stay selectable.
+    if (hover && world.has(...hover.coord)) {
+      const t = cubeEntry(hover.coord);
+      if (t !== null && (!hit || t <= hit.dist + 1e-6)) coord = hover.coord;
+    }
+    const el = coord ? targetElement(coord) : null;
+    if (el) { hover = { coord, element: el }; onHover(coord, el); }
     else { hover = null; onHover(null); }
   });
   dom.addEventListener('pointerup', (e) => {

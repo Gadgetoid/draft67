@@ -5,9 +5,12 @@
 import * as THREE from 'three';
 
 const AX = ['x', 'y', 'z'];
-// Cut amount is the fraction from the element (edge/vertex) to the block CENTRE:
-//   0 = no cut · 0.5 = classic 45-degree chamfer (to the face mid-lines) · 1 = a full diagonal
-//   slice through the middle (right-triangle wedge / slope, for rooflines etc).
+// Cut amount is the SETBACK: how far the cut plane sits from the element, measured along each
+// adjacent edge. 0 = no cut · 0.5 = classic 45-degree chamfer (to the face mid-lines) · 1 = for
+// an edge, a full diagonal slice through the block centre (right-triangle wedge / slope); for a
+// corner, a slice through the three neighbouring cube corners. Edge and corner cuts at the SAME
+// amount share their boundary lines, so a chamfer runs continuously across blocks: an L's arms
+// take edge cuts and the block joining them takes a corner cut, all at one amount.
 export const AMOUNTS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 
 // step a cut amount to the next (dir=+1) or previous (dir=-1) value, wrapping around
@@ -38,7 +41,8 @@ export function elementPlane(id, a) {
   const parts = id.split('|');
   if (parts[0] === 'c') {
     const s = parts[1].split('').map((c) => (c === '+' ? 1 : -1));
-    return { n: new THREE.Vector3(s[0], s[1], s[2]).normalize(), d: (Math.sqrt(3) / 2) * (1 - a) };
+    // plane through the three points `a` along each edge from the corner: |x|+|y|+|z| <= 1.5 - a
+    return { n: new THREE.Vector3(s[0], s[1], s[2]).normalize(), d: (1.5 - a) / Math.sqrt(3) };
   }
   const pair = parts[1], signs = parts[2];
   const n = new THREE.Vector3();
