@@ -13,14 +13,6 @@ const AX = ['x', 'y', 'z'];
 // take edge cuts and the block joining them takes a corner cut, all at one amount.
 export const AMOUNTS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 
-// step a cut amount to the next (dir=+1) or previous (dir=-1) value, wrapping around
-export function cycleAmount(a, dir = 1) {
-  let i = 0, best = Infinity;
-  AMOUNTS.forEach((v, k) => { const d = Math.abs(v - (a || 0)); if (d < best) { best = d; i = k; } });
-  const n = AMOUNTS.length;
-  return AMOUNTS[((i + dir) % n + n) % n];
-}
-
 // offset of an element's centre from its block centre; freeAxis is the axis an edge runs
 // along (0/1/2), or null for a corner
 export function elementOffset(id) {

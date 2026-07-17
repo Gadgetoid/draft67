@@ -1,12 +1,22 @@
 // Raycast add/remove of blocks, in both orbit (mouse) and first-person (crosshair) modes.
+// Chamfer editing is press-and-drag: pressing an edge/corner affirms the target (emphasized
+// highlight), dragging toward the block centre deepens the cut in snapped steps with live
+// geometry, and releasing without a drag changes nothing. Shift+Click toggles elements into a
+// multi-selection that drags together; each element clamps at the extremes, so overshooting
+// equalizes unaligned cuts (drag all to zero, then back in to a common depth).
 import * as THREE from 'three';
-import { nearestElement, cycleAmount } from './chamfer.js';
+import { nearestElement, elementOffset, AMOUNTS } from './chamfer.js';
 
-export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add', getChamfer = () => false, onHover = () => {} }) {
+const STEP_PX = 30; // drag distance per amount step
+
+export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add', getChamfer = () => false, onHover = () => {}, onSelection = () => {} }) {
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  const _pe = new THREE.Vector3(), _pc = new THREE.Vector3();
   let downX = 0, downY = 0, downId = null, active = 0, maxActive = 0;
-  let hover = null; // last hovered chamfer target { coord, element }, so a click hits what's shown
+  let hover = null;            // last hovered chamfer target { coord, element }
+  const selection = new Map(); // "x,y,z|element" -> { coord, element }
+  let cham = null;             // active chamfer drag { items, dx, dy, lx, ly, orbit, anchor }
 
   function castFromMouse(e) {
     const r = dom.getBoundingClientRect();
@@ -44,31 +54,112 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     return nearestElement({ x: O.x + D.x * t - coord[0], y: O.y + D.y * t - coord[1], z: O.z + D.z * t - coord[2] });
   }
 
-  // chamfer mode: cycle the targeted edge/corner of the block, respecting the total budget.
-  // Use the hovered target when we have one (desktop) so the click hits exactly what's highlighted,
-  // rather than re-picking and grazing onto a block behind it; fall back to a pick for touch.
-  function chamferAt(back) {
-    let coord, el;
-    if (hover) { coord = hover.coord; el = hover.element; }
-    else {
-      const hit = world.pick(ray);
-      if (!hit || !hit.coord) return;
-      coord = hit.coord; el = targetElement(coord);
+  // Chamfer targeting: walk the voxel grid along the ray (DDA) and take the FIRST existing block
+  // whose FULL cube the ray crosses, stopping at the picked surface. Carved-away regions still
+  // belong to their block, so cut edges/corners stay targetable, and a graze through one block's
+  // cut can never select whatever lies behind it.
+  function chamferTarget() {
+    const hit = world.pick(ray);
+    const tmax = (hit ? hit.dist : 60) + 1e-4;
+    const O = ray.ray.origin, D = ray.ray.direction;
+    let cx = Math.round(O.x), cy = Math.round(O.y), cz = Math.round(O.z);
+    const sx = Math.sign(D.x), sy = Math.sign(D.y), sz = Math.sign(D.z);
+    const dtx = 1 / Math.abs(D.x), dty = 1 / Math.abs(D.y), dtz = 1 / Math.abs(D.z);
+    let tx = sx ? (cx + 0.5 * sx - O.x) / D.x : Infinity;
+    let ty = sy ? (cy + 0.5 * sy - O.y) / D.y : Infinity;
+    let tz = sz ? (cz + 0.5 * sz - O.z) / D.z : Infinity;
+    for (let i = 0, t = 0; i < 400 && t <= tmax; i++) {
+      if (world.has(cx, cy, cz)) {
+        const element = targetElement([cx, cy, cz]);
+        return element ? { coord: [cx, cy, cz], element } : null;
+      }
+      if (tx <= ty && tx <= tz) { t = tx; tx += dtx; cx += sx; }
+      else if (ty <= tz) { t = ty; ty += dty; cy += sy; }
+      else { t = tz; tz += dtz; cz += sz; }
     }
-    if (!el) return;
-    const cm = world.getCuts(...coord);
-    const cur = cm.get(el) || 0;
-    let total = 0; for (const v of cm.values()) total += v;
-    const budget = world.chamferBudget ?? Infinity;
-    let amt;
-    if (back) {
-      amt = cycleAmount(cur, -1);            // stepping down always fits the budget
-    } else {
-      amt = cycleAmount(cur);                // step through until the new total fits (0 always fits)
-      while (amt !== 0 && total - cur + amt > budget + 1e-9) amt = cycleAmount(amt);
+    return null;
+  }
+
+  // --- chamfer drag ------------------------------------------------------------------------------
+
+  const selKey = (coord, element) => `${coord.join(',')}|${element}`;
+
+  function snapAmount(v) {
+    let best = 0, bd = Infinity;
+    for (const a of AMOUNTS) { const d = Math.abs(a - v); if (d < bd) { bd = d; best = a; } }
+    return best;
+  }
+
+  function syncSelection(dragging = false) {
+    for (const [k, s] of selection) if (!world.has(...s.coord)) selection.delete(k);
+    onSelection([...selection.values()], dragging);
+  }
+  function clearSelection() {
+    if (!selection.size) return;
+    selection.clear();
+    onSelection([], false);
+  }
+
+  // screen-space direction that deepens the cut: from the element toward its block centre
+  function deepenDir(coord, element) {
+    const r = dom.getBoundingClientRect();
+    const { offset } = elementOffset(element);
+    _pe.set(coord[0] + offset[0], coord[1] + offset[1], coord[2] + offset[2]).project(rig.activeCamera);
+    _pc.set(coord[0], coord[1], coord[2]).project(rig.activeCamera);
+    const dx = (_pc.x - _pe.x) * r.width, dy = -(_pc.y - _pe.y) * r.height;
+    const len = Math.hypot(dx, dy);
+    return len < 1e-6 ? { dx: 0, dy: 1 } : { dx: dx / len, dy: dy / len };
+  }
+
+  // the chamfer target under the pointer: the current hover for mouse, a fresh cast for touch
+  function resolveTarget(e) {
+    castFromMouse(e);
+    if (e.pointerType !== 'touch' && hover) return hover;
+    return chamferTarget();
+  }
+
+  function chamStart(e, items, anchor) {
+    const list = items.map(({ coord, element }) => {
+      const val = snapAmount(world.getCuts(...coord).get(element) || 0);
+      return { coord, element, val, applied: val };
+    });
+    cham = { items: list, ...deepenDir(anchor.coord, anchor.element), lx: e.clientX, ly: e.clientY, orbit: rig.orbit.enabled, anchor };
+    rig.orbit.enabled = false; // this gesture owns the pointer
+    try { dom.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    onHover(anchor.coord, anchor.element, true);
+    if (selection.size) syncSelection(true);
+  }
+
+  function chamDrag(e) {
+    const step = (((e.clientX - cham.lx) * cham.dx + (e.clientY - cham.ly) * cham.dy) / STEP_PX) * 0.2;
+    cham.lx = e.clientX; cham.ly = e.clientY;
+    let changed = false;
+    for (const it of cham.items) {
+      // per-element accumulator, clamped: overshoot is absorbed, so a multi-drag equalizes at 0/1
+      it.val = Math.min(1, Math.max(0, it.val + step));
+      let amt = snapAmount(it.val);
+      // block budget: step down until the block's cut total fits
+      const cm = world.getCuts(...it.coord);
+      const cur = cm.get(it.element) || 0;
+      let total = 0; for (const v of cm.values()) total += v;
+      const room = (world.chamferBudget ?? Infinity) - (total - cur);
+      while (amt > 0 && amt > room + 1e-9) amt = AMOUNTS[AMOUNTS.indexOf(amt) - 1];
+      if (amt < snapAmount(it.val)) it.val = amt; // budget-limited: don't bank unreachable travel
+      if (amt !== it.applied) {
+        it.applied = amt;
+        world.setCut(it.coord[0], it.coord[1], it.coord[2], it.element, amt);
+        changed = true;
+      }
     }
-    world.setCut(coord[0], coord[1], coord[2], el, amt);
-    onChange?.();
+    if (changed) onChange?.();
+  }
+
+  function chamEnd() {
+    if (!cham) return;
+    if (rig.mode === 'orbit' && !rig.blueprint) rig.orbit.enabled = cham.orbit;
+    onHover(cham.anchor.coord, cham.anchor.element, false);
+    if (selection.size) syncSelection(false);
+    cham = null;
   }
 
   // returns true if a block was actually placed/removed
@@ -77,7 +168,12 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     const hit = world.pick(ray);
     if (!hit) return false;
     if (remove) {
-      if (hit.remove) { world.remove(...hit.remove); onChange?.(); return true; }
+      if (hit.remove) {
+        world.remove(...hit.remove);
+        onChange?.();
+        if (selection.size) syncSelection();
+        return true;
+      }
       return false;
     }
     if (!world.has(...hit.place)) { world.set(...hit.place, ui.material); onChange?.(); return true; }
@@ -90,6 +186,23 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     active++;
     maxActive = Math.max(maxActive, active);
     if (active === 1) { downX = e.clientX; downY = e.clientY; downId = e.pointerId; }
+    if (cham) { if (active > 1) chamEnd(); return; } // second finger: yield to pinch/pan
+    if (active !== 1 || rig.mode !== 'orbit' || rig.blueprint || !getChamfer()) return;
+    if (e.pointerType !== 'touch' && e.button !== 0) return;
+    const t = resolveTarget(e);
+    if (!t) return; // empty space: leave the pointer to the camera
+    if (e.shiftKey) {
+      const k = selKey(t.coord, t.element);
+      if (selection.has(k)) selection.delete(k); else selection.set(k, t);
+      syncSelection();
+      return;
+    }
+    if (selection.has(selKey(t.coord, t.element))) {
+      chamStart(e, [...selection.values()], t); // drag the whole selection from any member
+    } else {
+      clearSelection();
+      chamStart(e, [t], t);
+    }
   });
   function endPointer(e) {
     const info = {
@@ -101,32 +214,30 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     if (active === 0) maxActive = 0;
     return info;
   }
-  dom.addEventListener('pointercancel', endPointer);
+  dom.addEventListener('pointercancel', (e) => { endPointer(e); chamEnd(); });
   // chamfer-mode hover: highlight the edge/corner under the cursor (skip while a pointer is down)
   dom.addEventListener('pointermove', (e) => {
-    if (rig.mode !== 'orbit' || active > 0 || !getChamfer()) { onHover(null); return; }
+    if (cham) { chamDrag(e); return; }
+    if (rig.mode !== 'orbit' || rig.blueprint || active > 0 || !getChamfer()) { onHover(null); return; }
     castFromMouse(e);
-    const hit = world.pick(ray);
-    let coord = hit && hit.coord ? hit.coord : null;
-    // Sticky target: a deeply carved block can have no surface left under the cursor, so the
-    // pick ray sails through to whatever is behind. Keep targeting the previous block while its
-    // full cube bounds sit in front of the pick hit, so cut-away edges stay selectable.
-    if (hover && world.has(...hover.coord)) {
-      const t = cubeEntry(hover.coord);
-      if (t !== null && (!hit || t <= hit.dist + 1e-6)) coord = hover.coord;
-    }
-    const el = coord ? targetElement(coord) : null;
-    if (el) { hover = { coord, element: el }; onHover(coord, el); }
-    else { hover = null; onHover(null); }
+    const t = chamferTarget();
+    hover = t;
+    if (t) onHover(t.coord, t.element);
+    else onHover(null);
   });
   dom.addEventListener('pointerup', (e) => {
     const { primary, multi, dist } = endPointer(e);
+    if (cham) { if (primary) chamEnd(); return; }
     if (rig.mode !== 'orbit') return;
     if (!primary || multi || dist > 7) return;       // multi-touch gesture or a drag, not a tap
     if (e.pointerType !== 'touch' && e.button !== 0 && e.button !== 2) return; // desktop L/R only
     castFromMouse(e);
-    // chamfer mode: LMB steps the cut up, RMB steps it down
-    if (getChamfer()) { chamferAt(e.pointerType !== 'touch' && e.button === 2); return; }
+    if (getChamfer()) {
+      // cut changes happen via press-and-drag; a tap on empty space just deselects
+      const hit = world.pick(ray);
+      if ((!hit || !hit.coord) && !e.shiftKey) clearSelection();
+      return;
+    }
     if (e.pointerType === 'touch') edit(getBrush() === 'del'); // mobile: Add/Del brush
     else edit(e.button === 2 || e.shiftKey);           // desktop: LMB place, RMB / Shift+LMB remove
   });
@@ -176,4 +287,11 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     requestAnimationFrame(paintLoop);
   });
   addEventListener('mouseup', () => { painting = false; });
+
+  return {
+    clearSelection,
+    // debug handles (used by the headless verifier)
+    getSelection: () => [...selection.keys()],
+    getHover: () => (hover ? selKey(hover.coord, hover.element) : null),
+  };
 }

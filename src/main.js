@@ -95,16 +95,20 @@ new ResizeObserver(resize).observe(canvas);
 
 function refreshHud() { ui.setCount(world.size); autosave(world); requestRender(); }
 
-// chamfer target highlight (thin ink bar + ghost cube); re-render only when it actually changes
-const showHighlight = createHighlight(scene);
-function hoverHighlight(coord, elementId) {
-  if (showHighlight(coord, elementId)) requestRender();
+// chamfer target highlights (ink bars + ghost cube); re-render only when they actually change
+const highlight = createHighlight(scene);
+function hoverHighlight(coord, elementId, active) {
+  if (highlight.hover(coord, elementId, active)) requestRender();
+}
+function selectionHighlight(items, dragging) {
+  if (highlight.select(items, dragging)) requestRender();
 }
 
-attachInteraction({
+const interaction = attachInteraction({
   dom: canvas, world, rig, ui, onChange: refreshHud,
-  getBrush: () => brush, getChamfer, onHover: hoverHighlight,
+  getBrush: () => brush, getChamfer, onHover: hoverHighlight, onSelection: selectionHighlight,
 });
+window.__draft.interaction = interaction;
 
 // --- toolbar wiring ---
 const $ = (id) => document.getElementById(id);
@@ -116,6 +120,7 @@ function setBrush(m) {
   $('brush-add').classList.toggle('active', m === 'add');
   $('brush-del').classList.toggle('active', m === 'del');
   $('brush-chamfer').classList.toggle('active', m === 'chamfer');
+  if (m !== 'chamfer') interaction.clearSelection();
 }
 $('brush-add').addEventListener('click', () => setBrush('add'));
 $('brush-del').addEventListener('click', () => setBrush('del'));
@@ -125,7 +130,7 @@ $('brush-chamfer').addEventListener('click', () => setBrush('chamfer'));
 function setChamferMode(on) {
   chamferMode = on;
   $('btn-chamfer').classList.toggle('active', on);
-  if (!on) hoverHighlight(null);
+  if (!on) { hoverHighlight(null); interaction.clearSelection(); }
 }
 $('btn-chamfer').addEventListener('click', () => setChamferMode(!chamferMode));
 
@@ -191,7 +196,7 @@ $('file-input').addEventListener('change', (e) => {
   e.target.value = '';
 });
 $('btn-clear').addEventListener('click', () => {
-  if (confirm('Clear all blocks?')) { world.clear(); refreshHud(); }
+  if (confirm('Clear all blocks?')) { world.clear(); interaction.clearSelection(); refreshHud(); }
 });
 
 addEventListener('keydown', (e) => {
@@ -201,6 +206,7 @@ addEventListener('keydown', (e) => {
   if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
   if (rig.blueprint) { if (e.code === 'Escape') exitBlueprint(); return; }
   if (e.code === 'Tab') { e.preventDefault(); rig.toggle(); syncModeUi(); }
+  else if (e.code === 'Escape') interaction.clearSelection();
   else if (e.code === 'KeyC') setChamferMode(!chamferMode);   // toggle chamfer editing
   else if (/^(Digit|Numpad)\d$/.test(e.code)) ui.selectByKey(e.code.slice(-1));
   else if (e.code.startsWith('Key')) ui.selectByKey(e.code.slice(3).toLowerCase()); // y/u/i/o/p etc.
