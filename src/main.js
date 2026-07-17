@@ -1,7 +1,7 @@
 // Draft'67 ⸻ 1-bit voxel drafting engine. Bootstrap + render loop.
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
-import { applyTheme, currentTheme } from './theme.js';
+import { applyTheme, currentTheme, THEMES, THEME_NAMES } from './theme.js';
 import { VoxelWorld } from './world.js';
 import { CameraRig } from './controls.js';
 import { UI } from './ui.js';
@@ -201,13 +201,26 @@ function setTheme(name) {
   syncTheme();
   requestRender();
 }
+// Build the sheet-style picker from the theme registry: one button per theme, with a small
+// live-colour preview (paper fill + ink ring) taken straight from the theme's swatches.
+const sheetOpts = $('sheet-opts');
+for (const [name, t] of Object.entries(THEMES)) {
+  const btn = document.createElement('button');
+  btn.className = 'mt-swatch';
+  btn.dataset.theme = name;
+  btn.title = t.label;
+  const prev = document.createElement('span');
+  prev.className = 'mt-prev';
+  prev.style.background = t.paper;
+  prev.style.boxShadow = `inset 0 0 0 2px ${t.ink}, inset 0 0 0 4px ${t.paper}`;
+  btn.append(prev, document.createTextNode(t.label));
+  btn.addEventListener('click', () => setTheme(name));
+  sheetOpts.appendChild(btn);
+}
 function syncTheme() {
   const t = currentTheme();
-  $('theme-paper').classList.toggle('active', t === 'paper');
-  $('theme-blueprint').classList.toggle('active', t === 'blueprint');
+  sheetOpts.querySelectorAll('[data-theme]').forEach((b) => b.classList.toggle('active', b.dataset.theme === t));
 }
-$('theme-paper').addEventListener('click', () => setTheme('paper'));
-$('theme-blueprint').addEventListener('click', () => setTheme('blueprint'));
 
 // Palette position: left column (desktop default) or bottom bar (mobile default,
 // where the toggle is hidden). Persisted per device.
@@ -274,7 +287,7 @@ addEventListener('keydown', (e) => {
   else if (e.code === 'KeyB') setTool('build');
   else if (e.code === 'KeyC') setTool('chamfer');
   else if (e.code === 'KeyN') setTool('paint');
-  else if (e.code === 'KeyV') setTheme(currentTheme() === 'paper' ? 'blueprint' : 'paper');
+  else if (e.code === 'KeyV') setTheme(THEME_NAMES[(THEME_NAMES.indexOf(currentTheme()) + 1) % THEME_NAMES.length]);
   else if (/^(Digit|Numpad)\d$/.test(e.code)) ui.selectByKey(e.code.slice(-1));
   else if (e.code.startsWith('Key')) ui.selectByKey(e.code.slice(3).toLowerCase()); // y/u/i/o/p etc.
 });

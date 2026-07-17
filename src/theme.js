@@ -1,33 +1,44 @@
 // Shared ink/paper colours used across the hatch, outline and grid shaders so a single toggle
-// recolours the whole scene live. Two themes: classic paper (ink on cream) and blueprint
-// (white on blue). Values are the shader's working colours; `bg` is the matching CSS/scene colour.
+// recolours the whole scene live. Strictly two-tone: every rendered pixel is either paper or ink.
+// This registry is the single source of truth - the shader uniforms, the CSS chrome and the menu
+// picker all derive from it, so a new theme is just one more entry below.
 import * as THREE from 'three';
 import { uniform } from 'three/tsl';
 
-export const inkColor = uniform(new THREE.Vector3(0.078, 0.067, 0.043));
-export const paperColor = uniform(new THREE.Vector3(0.949, 0.914, 0.816));
+export const inkColor = uniform(new THREE.Vector3());
+export const paperColor = uniform(new THREE.Vector3());
 
-const THEMES = {
-  paper: { ink: [0.078, 0.067, 0.043], paper: [0.949, 0.914, 0.816], bg: '#f2e9d0' },
-  blueprint: { ink: [0.58, 0.71, 0.92], paper: [0.05, 0.19, 0.42], bg: '#0f3b74' },
+// Each theme is two authored sRGB swatches: ink (lines) on paper (fill / background).
+export const THEMES = {
+  paper: { label: 'Paper', ink: '#14110b', paper: '#f2e9d0' },
+  blueprint: { label: 'Blueprint', ink: '#a6c1ef', paper: '#0f3b74' },
+  console: { label: 'Console', ink: '#33ff33', paper: '#0a0f0a' },
+  cga: { label: 'CGA', ink: '#2ee6e6', paper: '#b800b8' },
 };
+export const THEME_NAMES = Object.keys(THEMES);
 
 let current = 'paper';
+const _c = new THREE.Color();
+
+function linear(hex) { _c.set(hex); return [_c.r, _c.g, _c.b]; }
 
 export function applyTheme(name, scene) {
   const t = THEMES[name] || THEMES.paper;
-  current = t === THEMES.paper ? 'paper' : name;
-  inkColor.value.set(...t.ink);
-  paperColor.value.set(...t.paper);
+  current = THEMES[name] ? name : 'paper';
+  // Shader nodes are linear and sRGB-encoded on output, so feed the linearised swatches; this keeps
+  // the rendered paper/ink matched to the scene background and the CSS chrome.
+  paperColor.value.set(...linear(t.paper));
+  inkColor.value.set(...linear(t.ink));
   if (scene) {
     if (!scene.background) scene.background = new THREE.Color();
-    scene.background.set(t.bg);
+    scene.background.set(t.paper);
   }
   document.documentElement.dataset.theme = current;
 }
 
 export function toggleTheme(scene) {
-  applyTheme(current === 'paper' ? 'blueprint' : 'paper', scene);
+  const i = THEME_NAMES.indexOf(current);
+  applyTheme(THEME_NAMES[(i + 1) % THEME_NAMES.length], scene);
   return current;
 }
 

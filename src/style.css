@@ -14,9 +14,18 @@
   --ink-soft: #a6c1ef66;
   --outer: #082247;
 }
-/* palette swatches: drop the grayscale (it kills the blue) and invert the line art white-on-blue */
-:root[data-theme="blueprint"] .swatch { filter: none; }
-:root[data-theme="blueprint"] .swatch canvas { filter: invert(1); }
+:root[data-theme="console"] {
+  --paper: #0a0f0a;
+  --ink: #33ff33;
+  --ink-soft: #33ff3355;
+  --outer: #050805;
+}
+:root[data-theme="cga"] {
+  --paper: #b800b8;
+  --ink: #2ee6e6;
+  --ink-soft: #2ee6e655;
+  --outer: #7a007a;
+}
 
 * { box-sizing: border-box; }
 
@@ -114,9 +123,18 @@ html, body {
   cursor: pointer;
   background: var(--paper);
   image-rendering: pixelated;
-  filter: grayscale(1) contrast(1.4);
 }
-.swatch canvas { width: 100%; height: 100%; display: block; }
+/* ink line art, recoloured per theme: the pattern masks a var(--ink) fill over the paper */
+.swatch-art {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  mask-mode: alpha;
+}
 .swatch .label {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -130,6 +148,7 @@ html, body {
   padding: 1px 0;
   line-height: 1.1;
   letter-spacing: 0;
+  font-weight: 600;
 }
 .swatch .key {
   position: absolute;
@@ -196,7 +215,7 @@ html, body {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 190px;
+  min-width: 230px;
   background: var(--paper);
   border: 2px solid var(--ink);
   display: flex;
@@ -293,9 +312,9 @@ html, body {
 .mt-opts { display: flex; gap: 6px; }
 .mt-swatch { flex: 1; justify-content: flex-start; padding: 5px 7px; }
 .mt-prev { width: 16px; height: 16px; flex: 0 0 auto; image-rendering: pixelated; }
-/* Fixed theme colours so both previews read correctly whatever the active theme is */
-.prev-paper { background: #f2e9d0; box-shadow: inset 0 0 0 2px #14110b, inset 0 0 0 4px #f2e9d0; }
-.prev-blueprint { background: #0f3b74; box-shadow: inset 0 0 0 2px #a6c1ef, inset 0 0 0 4px #0f3b74; }
+/* Sheet picker: one button per theme, two per row; previews are coloured inline from the registry */
+#sheet-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#sheet-opts .mt-swatch { font-size: 10px; white-space: nowrap; }
 
 /* Palette-position previews: a bar on the left edge vs the bottom edge. Marks
    follow the button text colour so they invert with the selected state. */

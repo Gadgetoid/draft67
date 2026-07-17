@@ -12,8 +12,14 @@ export class UI {
       const el = document.createElement('div');
       el.className = 'swatch';
       el.title = m.name;
-      const cv = makeHatchCanvas(m, 96);
-      el.appendChild(cv);
+      // The hatch pattern (deterministic, black-on-transparent) is used as an alpha mask over an
+      // ink-coloured fill, so the swatch recolours with the theme via CSS instead of a fixed image.
+      const art = document.createElement('span');
+      art.className = 'swatch-art';
+      const url = makeHatchCanvas(m, 96).toDataURL();
+      art.style.webkitMaskImage = `url(${url})`;
+      art.style.maskImage = `url(${url})`;
+      el.appendChild(art);
       if (m.key) {
         const key = document.createElement('span');
         key.className = 'key';
