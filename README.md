@@ -4,10 +4,12 @@
 
 Build in 3D with the visual language of an old engineering drawing. Every block is skinned in a
 conventional draughting **cross-hatch** (cast iron, steel, brass, copper, wood, brick, stone,
-glass, and more) rendered strictly in two tones: ink on paper, or white on blueprint blue.
-Place and remove blocks, fly around, and export a clean orthographic **blueprint** of your model.
+glass, and more) rendered **strictly in two tones**. Flip the whole drawing between four sheet
+styles - **Paper** (ink on cream), **Blueprint** (white on blue), **Console** (green on black) and
+**CGA** (teal on magenta). Place, remove, chamfer and re-material blocks, fly around, and export a
+clean orthographic **blueprint** of your model.
 
-![Draft'67 in both themes, paper and blueprint, split down the middle](screenshot.png)
+![Draft'67 in all four sheet styles - paper, blueprint, console and CGA - as diagonal slices over one continuous stack of every material](screenshot.png)
 
 † - blame my kids
 
@@ -43,32 +45,44 @@ the dev server running and a one-time `npx playwright install chromium`).
 
 ## Controls
 
-**Camera:** `Tab` toggles between Orbit and First-person.
+**Camera:** `Tab` toggles between **Orbit** and **Explore** (first-person).
 
-| | Orbit | First-person |
+| | Orbit | Explore |
 |---|---|---|
 | Look | LMB drag | move mouse (click to capture) / `Arrow` keys |
 | Move | `WASD` pan (across the view plane) | `WASD` move, `Space`/`Ctrl` up-down |
 | Pan / zoom | MMB drag / scroll | n/a |
 
-**Building**
+**Edit tools** - three mutually-exclusive tools, chosen from the top-left toolbar or by key:
 
-- **LMB** places a block. **RMB** or **Shift-LMB** removes a block.
-- In first-person you can **hold** the button and sweep the crosshair (with the mouse or the arrow
-  keys) to paint a run of blocks; erasing is rate-limited so a sweep doesn't clear a whole row.
-- There's always a ground plane to place the first block on.
-- **Materials:** number keys `1 2 3 4 5 6 7 8 9 0` then `Y U I O P`, in palette order, or click a
-  swatch in the hotbar.
+- **Build** (`B`): **LMB** places, **RMB** / **Shift-LMB** removes. A faint **ghost cube** previews
+  where the next block will land. There's always a ground plane to place the first block on.
+- **Chamfer** (`C`): drag on an edge or corner to bevel it in snapped steps; **Shift-click**
+  multi-selects elements to cut together; `Esc` deselects.
+- **Paint** (`N`): click a block to re-skin it with the selected material, keeping its shape (the
+  ghost cube shows which block is targeted).
 
-**Toolbar**
+In **Explore** you can also **hold** the button and sweep the crosshair (mouse or arrow keys) to
+paint a run of blocks; erasing is rate-limited so a sweep doesn't clear a whole row.
 
-- **Orbit / First-person:** camera toggle (same as `Tab`).
-- **Blueprint:** toggle the paper / blueprint-blue theme.
-- **Preview:** enter the orthographic **blueprint preview**: grid hidden, orbit or use the
+**Materials:** number keys `1 2 3 4 5 6 7 8 9 0` then `Y U I O P`, in palette order, or click a
+swatch. **Sheet style:** `V` cycles Paper -> Blueprint -> Console -> CGA (or pick one in the menu).
+
+## Interface
+
+- **Top-left** - two icon **segmented controls**: camera (**Orbit** / **Explore**) and edit tool
+  (**Build** / **Chamfer** / **Paint**), the active one inked.
+- **Top-right menu** (the hamburger): **Preview**, **Save**, **Load**, **New**, plus a **Sheet**
+  picker (the four styles, each with a little colour preview) and a **Palette** position toggle
+  (left column on desktop, bottom bar on touch).
+- **Preview** enters the orthographic **blueprint preview**: grid hidden, orbit or use the
   **orientation cube** (click a face, or ISO) to snap to a cardinal view, then **Export PNG** a
-  1-bit blueprint of the model. **Exit** (or `Esc`) to return.
-- **Save / Load:** download / upload the model as JSON (also autosaved to `localStorage`).
-- **Clear:** remove all blocks.
+  1-bit image of the model. **Exit** (or `Esc`) to return.
+- **Save / Load / New:** download / upload the model as JSON, or clear and start over (a house-style
+  dialog confirms first). Work is autosaved to `localStorage`.
+
+The toolbar icons come from a pixel-icon web font (see below); menus and dialogs use a dithered
+1-bit drop shadow and backdrop rather than a soft blur, to keep the two-tone look.
 
 ## How it works
 
@@ -83,11 +97,20 @@ the dev server running and a one-time `npx playwright install chromium`).
 - **Outlines** come from a screen-space pass that inks edges where surface normal, depth, or
   **material id** breaks, so silhouettes, creases, and boundaries between different materials are
   drawn, but the internal seams of a merged surface are not.
-- **Theme** colours are shared shader uniforms, so one toggle recolours the whole scene live.
+- **Themes** are a tiny registry - two sRGB swatches (ink + paper) per style. The shader uniforms
+  (linearised so fills match exactly), the CSS chrome, and the menu picker all derive from it, so a
+  new sheet style is essentially one entry. Palette swatches recolour by masking a `var(--ink)` fill
+  with the material pattern, so the ink line-art follows the active theme.
 - Shaders are written in **TSL** (Three Shading Language) so a single source compiles to both WGSL
   (WebGPU) and GLSL (WebGL2).
+
+## Credits
+
+The toolbar/menu icons are a scalable web font built from **nikoichu's 1-bit Pixel Icons**
+(https://nikoichu.itch.io/pixel-icons), white pixels only, traced to pixel-accurate vector glyphs.
+The font ships in [public/iconfont/](public/iconfont/); the generator lives alongside the project.
 
 ## License
 
 Released under **[CC0 1.0 Universal](LICENSE)**: public domain, no rights reserved. Do whatever
-you like with it.
+you like with it. (The icon pack keeps its own licence - see Credits.)
