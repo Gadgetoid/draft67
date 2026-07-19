@@ -5,9 +5,10 @@
 // multi-selection that drags together; each element clamps at the extremes, so overshooting
 // equalizes unaligned cuts (drag all to zero, then back in to a common depth).
 import * as THREE from 'three';
-import { nearestElement, elementOffset, AMOUNTS } from './chamfer.js';
+import { nearestElement, elementOffset, chamferVolume, AMOUNTS } from './chamfer.js';
 
-const STEP_PX = 30; // drag distance per amount step
+const STEP_PX = 30;      // drag distance per amount step
+const MIN_VOLUME = 0.03; // reject a cut that would carve the block below this (of a unit cube)
 
 export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = () => 'add', getChamfer = () => false, getPaint = () => false, onHover = () => {}, onSelection = () => {}, onPlace = () => {} }) {
   const ray = new THREE.Raycaster();
@@ -130,27 +131,33 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
     if (selection.size) syncSelection(true);
   }
 
+  // A block's cut map with one element proposed at `amt` (deleted at 0), for testing the result.
+  function proposedCuts(coord, element, amt) {
+    const cm = new Map(world.getCuts(...coord));
+    if (amt > 0) cm.set(element, amt); else cm.delete(element);
+    return cm;
+  }
+
+  // Advance one chamfer element by `step`: accumulate (clamped 0..1 so overshoot equalizes a
+  // multi-drag), snap, then back off any step that would carve the block out of existence.
+  function applyStep(it, step) {
+    it.val = Math.min(1, Math.max(0, it.val + step));
+    let amt = snapAmount(it.val);
+    while (amt > 0 && chamferVolume(proposedCuts(it.coord, it.element, amt)) < MIN_VOLUME) {
+      amt = AMOUNTS[AMOUNTS.indexOf(amt) - 1];
+    }
+    if (amt < snapAmount(it.val)) it.val = amt; // don't bank travel we couldn't apply
+    if (amt === it.applied) return false;
+    it.applied = amt;
+    world.setCut(it.coord[0], it.coord[1], it.coord[2], it.element, amt);
+    return true;
+  }
+
   function chamDrag(e) {
     const step = (((e.clientX - cham.lx) * cham.dx + (e.clientY - cham.ly) * cham.dy) / STEP_PX) * 0.2;
     cham.lx = e.clientX; cham.ly = e.clientY;
     let changed = false;
-    for (const it of cham.items) {
-      // per-element accumulator, clamped: overshoot is absorbed, so a multi-drag equalizes at 0/1
-      it.val = Math.min(1, Math.max(0, it.val + step));
-      let amt = snapAmount(it.val);
-      // block budget: step down until the block's cut total fits
-      const cm = world.getCuts(...it.coord);
-      const cur = cm.get(it.element) || 0;
-      let total = 0; for (const v of cm.values()) total += v;
-      const room = (world.chamferBudget ?? Infinity) - (total - cur);
-      while (amt > 0 && amt > room + 1e-9) amt = AMOUNTS[AMOUNTS.indexOf(amt) - 1];
-      if (amt < snapAmount(it.val)) it.val = amt; // budget-limited: don't bank unreachable travel
-      if (amt !== it.applied) {
-        it.applied = amt;
-        world.setCut(it.coord[0], it.coord[1], it.coord[2], it.element, amt);
-        changed = true;
-      }
-    }
+    for (const it of cham.items) changed = applyStep(it, step) || changed;
     if (changed) onChange?.();
   }
 
@@ -240,7 +247,8 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
   // ghost cube at the build/paint target.
   dom.addEventListener('pointermove', (e) => {
     if (cham) { chamDrag(e); return; }
-    if (rig.mode !== 'orbit' || rig.blueprint || active > 0) { onHover(null); onPlace(null); return; }
+    if (rig.mode === 'fp') return;                                  // first-person aim owned by updateAim()
+    if (rig.blueprint || active > 0) { onHover(null); onPlace(null); return; }
     castFromMouse(e);
     if (getChamfer()) {
       const t = chamferTarget();
@@ -272,53 +280,88 @@ export function attachInteraction({ dom, world, rig, ui, onChange, getBrush = ()
   });
   dom.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // First-person mode: pointer-locked, edit from crosshair. Hold to keep painting/erasing
-  // as you look around.
-  // Painting is cell-relative, not pixel-relative: a block lands whenever the crosshair moves onto
-  // a new empty cell. Cells laid during THIS stroke are ignored as ray targets so you don't build
-  // a stack straight at the camera off your own fresh blocks.
-  let painting = false, paintRemove = false, lastErase = 0;
+  // First-person mode: pointer-locked, act from the crosshair (ray through the screen centre).
+  // Build / paint / erase run as a held stroke - sweep the crosshair to keep going. Chamfer applies
+  // one snapped step per click (a drag is reserved for looking around); Shift or RMB steps back out.
+  // Building is cell-relative: a block lands whenever the crosshair moves onto a new empty cell, and
+  // cells laid during THIS stroke are ignored as targets so you don't build a stack at your face.
+  let stroke = null;           // { kind: 'build' | 'erase' | 'paint' } while a button is held
+  let fpCham = null;           // { anchor, item, dx, dy } while chamfering by hold-and-look
+  let lastErase = 0, aiming = false;
   const strokePlaced = new Set();
-  const ERASE_MS = 140; // min gap between erases so a sweep doesn't blow away a whole row at once
-  function paintTick() {
+  const ERASE_MS = 140;        // min gap between erases so a sweep doesn't blow away a whole row at once
+
+  function strokeTick() {
     castFromCenter();
     const hit = world.pick(ray);
     if (!hit) return;
-    if (paintRemove) {
+    if (stroke.kind === 'erase') {
       const now = performance.now();
-      if (hit.remove && now - lastErase >= ERASE_MS) {
-        world.remove(...hit.remove);
-        lastErase = now;
-        onChange?.();
-      }
-      return;
+      if (hit.remove && now - lastErase >= ERASE_MS) { world.remove(...hit.remove); lastErase = now; onChange?.(); }
+    } else if (stroke.kind === 'paint') {
+      if (hit.remove && world.material(...hit.remove) !== ui.material) { world.set(...hit.remove, ui.material); onChange?.(); }
+    } else {
+      if (hit.remove && strokePlaced.has(hit.remove.join(','))) return;
+      if (world.has(...hit.place)) return;
+      world.set(...hit.place, ui.material); strokePlaced.add(hit.place.join(',')); onChange?.();
     }
-    if (hit.remove && strokePlaced.has(hit.remove.join(','))) return; // don't build on this stroke's blocks
-    if (world.has(...hit.place)) return;
-    world.set(...hit.place, ui.material);
-    strokePlaced.add(hit.place.join(','));
-    onChange?.();
   }
-  // While holding, paint every frame so arrow-key look (not just the mouse) keeps painting.
-  function paintLoop() {
-    if (!painting) return;
-    if (rig.mode === 'fp' && rig.fp.isLocked) paintTick();
-    requestAnimationFrame(paintLoop);
+  // While holding, run every frame so arrow-key look (not just the mouse) keeps the stroke going.
+  function strokeLoop() {
+    if (!stroke) return;
+    if (rig.mode === 'fp' && rig.fp.isLocked) strokeTick();
+    requestAnimationFrame(strokeLoop);
   }
+
+  // Chamfer by hold-and-look: pressing anchors the crosshair's edge/corner; mouse motion then feeds
+  // the same pointer-locked deltas that turn the view into the cut depth (toward the block deepens,
+  // back out reduces), so you keep looking around while adjusting - the orbit drag, hands-free.
+  function fpChamStart() {
+    const t = chamferTarget();          // ray already cast from the centre
+    if (!t) return;
+    const val = snapAmount(world.getCuts(...t.coord).get(t.element) || 0);
+    fpCham = { anchor: t, item: { coord: t.coord, element: t.element, val, applied: val }, ...deepenDir(t.coord, t.element) };
+    onHover(t.coord, t.element, true);  // emphasized while adjusting
+  }
+  function fpChamDrag(e) {
+    const step = ((e.movementX * fpCham.dx + e.movementY * fpCham.dy) / STEP_PX) * 0.2;
+    if (applyStep(fpCham.item, step)) onChange?.();
+  }
+  function fpChamEnd() {
+    if (!fpCham) return;
+    onHover(fpCham.anchor.coord, fpCham.anchor.element, false);
+    fpCham = null;
+  }
+
   dom.addEventListener('click', () => { if (rig.mode === 'fp' && !rig.fp.isLocked) rig.fp.lock(); });
   dom.addEventListener('mousedown', (e) => {
     if (rig.mode !== 'fp' || !rig.fp.isLocked) return;
     if (e.button !== 0 && e.button !== 2) return; // ignore middle etc.
-    painting = true;
-    paintRemove = e.button === 2 || e.shiftKey;
+    castFromCenter();
+    if (getChamfer()) { fpChamStart(); return; }  // hold, then look to adjust the cut
+    stroke = { kind: (e.button === 2 || e.shiftKey) ? 'erase' : getPaint() ? 'paint' : 'build' };
     strokePlaced.clear();
-    paintTick();
-    requestAnimationFrame(paintLoop);
+    strokeTick();
+    requestAnimationFrame(strokeLoop);
   });
-  addEventListener('mouseup', () => { painting = false; });
+  // Pointer-locked look deltas (same motion that rotates the view) drive an in-progress chamfer.
+  document.addEventListener('mousemove', (e) => { if (fpCham) fpChamDrag(e); });
+  addEventListener('mouseup', () => { stroke = null; fpChamEnd(); });
+
+  // Crosshair aim feedback, called each frame from the render loop while flying: chamfer bars on
+  // the targeted edge/corner, or the build/paint ghost at whatever the centre ray hits.
+  function updateAim() {
+    const active = rig.mode === 'fp' && rig.fp.isLocked && !rig.blueprint && !stroke && !fpCham;
+    if (!active) { if (aiming) { onHover(null); onPlace(null); aiming = false; } return; }
+    aiming = true;
+    castFromCenter();
+    if (getChamfer()) { const t = chamferTarget(); onHover(t ? t.coord : null, t ? t.element : null); onPlace(null); }
+    else { onHover(null); onPlace(previewCoord()); }
+  }
 
   return {
     clearSelection,
+    updateAim,
     // debug handles (used by the headless verifier)
     getSelection: () => [...selection.keys()],
     getHover: () => (hover ? selKey(hover.coord, hover.element) : null),

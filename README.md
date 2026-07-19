@@ -62,8 +62,11 @@ the dev server running and a one-time `npx playwright install chromium`).
 - **Paint** (`N`): click a block to re-skin it with the selected material, keeping its shape (the
   ghost cube shows which block is targeted).
 
-In **Explore** you can also **hold** the button and sweep the crosshair (mouse or arrow keys) to
-paint a run of blocks; erasing is rate-limited so a sweep doesn't clear a whole row.
+In **Explore** the crosshair is the cursor and every tool works from it: **hold** and sweep (mouse
+or arrow keys) to lay a run of blocks (Build), reswatch a run (Paint), or erase (rate-limited so a
+sweep doesn't clear a whole row). **Chamfer** is hold-and-look: press on an edge/corner, then keep
+moving the mouse - the same motion that turns your view feeds the cut depth (toward the block
+deepens, back out reduces), so you adjust the bevel while looking around.
 
 **Materials:** number keys `1 2 3 4 5 6 7 8 9 0` then `Y U I O P`, in palette order, or click a
 swatch. **Sheet style:** `V` cycles Paper -> Blueprint -> Console -> CGA (or pick one in the menu).

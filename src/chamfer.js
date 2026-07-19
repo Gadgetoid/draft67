@@ -71,7 +71,7 @@ function intersect3(A, B, C) {
     .multiplyScalar(1 / det);
 }
 
-function geometryFromPlanes(planes) {
+function hull(planes) {
   const N = planes.length;
   const verts = [];
   const add = (p) => { for (const q of verts) if (q.distanceToSquared(p) < 1e-8) return; verts.push(p); };
@@ -109,6 +109,11 @@ function geometryFromPlanes(planes) {
     }
   }
 
+  return { pos, nor };
+}
+
+function geometryFromPlanes(planes) {
+  const { pos, nor } = hull(planes);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
@@ -116,8 +121,8 @@ function geometryFromPlanes(planes) {
   return g;
 }
 
-// build a unit-cube geometry (centred on origin) with the given cuts (Map or object: id -> amount)
-export function buildChamferGeometry(cuts) {
+// the half-spaces bounding a block: the six cube faces plus one plane per active cut
+function planesFor(cuts) {
   const planes = [
     { n: new THREE.Vector3(1, 0, 0), d: 0.5 }, { n: new THREE.Vector3(-1, 0, 0), d: 0.5 },
     { n: new THREE.Vector3(0, 1, 0), d: 0.5 }, { n: new THREE.Vector3(0, -1, 0), d: 0.5 },
@@ -125,5 +130,24 @@ export function buildChamferGeometry(cuts) {
   ];
   const entries = cuts instanceof Map ? cuts.entries() : Object.entries(cuts);
   for (const [id, a] of entries) if (a > 0) planes.push(elementPlane(id, a));
-  return geometryFromPlanes(planes);
+  return planes;
+}
+
+// build a unit-cube geometry (centred on origin) with the given cuts (Map or object: id -> amount)
+export function buildChamferGeometry(cuts) {
+  return geometryFromPlanes(planesFor(cuts));
+}
+
+// Volume of the solid left after the cuts (unit cube = 1). Sum of signed tetrahedra over the
+// closed, outward-wound surface (divergence theorem); 0 when the cuts leave no solid.
+export function chamferVolume(cuts) {
+  const { pos } = hull(planesFor(cuts));
+  let v = 0;
+  for (let i = 0; i < pos.length; i += 9) {
+    const ax = pos[i], ay = pos[i + 1], az = pos[i + 2];
+    const bx = pos[i + 3], by = pos[i + 4], bz = pos[i + 5];
+    const cx = pos[i + 6], cy = pos[i + 7], cz = pos[i + 8];
+    v += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return Math.abs(v) / 6;
 }

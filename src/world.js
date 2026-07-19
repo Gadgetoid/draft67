@@ -24,7 +24,6 @@ export class VoxelWorld {
     this.voxels = new Map(); // "x,y,z" -> materialId
     this.cuts = new Map();   // "x,y,z" -> Map(elementId -> amount)  (chamfered blocks only)
     this.shaped = new Map(); // "x,y,z" -> THREE.Mesh (individual mesh for a chamfered block)
-    this.chamferBudget = 3.0; // hard cap on the SUM of a block's cut amounts (stops carving to nothing)
     this.group = new THREE.Group();
     this.shapedGroup = new THREE.Group();
     this.group.add(this.shapedGroup);

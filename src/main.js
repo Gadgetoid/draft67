@@ -67,6 +67,7 @@ async function frame() {
       const f = rig.mode === 'fp' ? camera.position : rig.orbit.target; // grid follows the focus
       world.setGridCenter(f.x, f.z);
     }
+    interaction.updateAim(); // first-person crosshair target: chamfer bars / build+paint ghost
     const cam = rig.activeCamera;
     try {
       if (state.useOutline && outline) await outline.render(scene, cam);
